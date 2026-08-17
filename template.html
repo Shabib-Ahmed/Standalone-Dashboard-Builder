@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>%%TITLE%%</title>
+<script src="https://cdn.plot.ly/plotly-%%PLOTLY_VERSION%%.min.js"></script>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+    font-family: Arial, sans-serif;
+    margin: 20px;
+    background: #fff;
+    color: #222;
+}
+
+h1 {
+    margin-bottom: 16px;
+}
+
+/* ── Top-level view tabs ─────────────────────────────────────── */
+
+.view-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 0;
+    border-bottom: 2px solid #4472C4;
+    padding-bottom: 0;
+}
+
+.view-tabs button {
+    padding: 10px 24px;
+    border: 2px solid #4472C4;
+    border-bottom: none;
+    background: #fff;
+    color: #4472C4;
+    font-size: 15px;
+    font-weight: bold;
+    cursor: pointer;
+    border-radius: 4px 4px 0 0;
+    transition: background 0.15s, color 0.15s;
+}
+
+.view-tabs button:hover {
+    background: #e8f0fe;
+}
+
+.view-tabs button.active-tab {
+    background: #4472C4;
+    color: #fff;
+    border-color: #4472C4;
+}
+
+/* ── Section / inner tabs ────────────────────────────────────── */
+
+.tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 16px 0 0 0;
+    border-bottom: 2px solid #ccc;
+}
+
+.tabs button {
+    padding: 8px 16px;
+    border: 1px solid #ccc;
+    border-bottom: none;
+    background: #f5f5f5;
+    color: #444;
+    font-size: 14px;
+    cursor: pointer;
+    border-radius: 4px 4px 0 0;
+    transition: background 0.15s, color 0.15s;
+}
+
+.tabs button:hover {
+    background: #e8f0fe;
+    color: #4472C4;
+}
+
+.tabs button.active-tab {
+    background: #1a73e8;
+    color: #fff;
+    border-color: #1a73e8;
+}
+
+/* ── Section dropdown ────────────────────────────────────────── */
+
+.section-select-wrap {
+    margin: 16px 0 8px 0;
+}
+
+.section-select-wrap label {
+    font-weight: bold;
+    margin-right: 8px;
+}
+
+select {
+    padding: 8px 12px;
+    font-size: 14px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+/* ── View / section panels ───────────────────────────────────── */
+
+.view-panel {
+    display: none;
+    padding: 16px 0;
+}
+
+.section-panel {
+    display: none;
+}
+
+.tab-content {
+    display: none;
+    padding-top: 12px;
+}
+
+/* ── Data tables ─────────────────────────────────────────────── */
+
+table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13px;
+}
+
+thead th {
+    padding: 8px 12px;
+    background: #4472C4;
+    color: #fff;
+    text-align: center;
+    border: 1px solid #ddd;
+    white-space: nowrap;
+}
+
+tbody td {
+    padding: 6px 12px;
+    text-align: center;
+    border: 1px solid #ddd;
+}
+
+tbody td:first-child {
+    text-align: left;
+    font-weight: bold;
+    white-space: nowrap;
+    background: #f8f8f8;
+}
+
+tbody tr:nth-child(even) {
+    background: #f2f2f2;
+}
+
+.plotly-graph-div {
+    width: 100% !important;
+}
+</style>
+</head>
+
+<body>
+
+<h1>%%TITLE%%</h1>
+
+<!-- ── Top-level tab bar ───────────────────────────────────────── -->
+<div class="view-tabs">
+
+    <button id="btn-dept" class="active-tab" onclick="switchView('dept')">
+        %%MAIN_TAB_LABEL%%
+    </button>
+
+    %%VIEW_TAB_BUTTONS%%
+
+</div>
+
+<!-- ── Main (sections) panel ──────────────────────────────────── -->
+<div id="view-dept" class="view-panel">
+
+    <div class="section-select-wrap">
+        <label>%%DROPDOWN_LABEL%%:</label>
+        <select id="sectionDropdown" onchange="changeSection()">
+            %%SECTION_DROPDOWN%%
+        </select>
+    </div>
+
+    %%SECTIONS%%
+
+</div>
+
+<!-- ── Additional view panels (injected by builder) ───────────── -->
+%%VIEWS%%
+
+<!-- ── All chart / view JavaScript (injected by builder) ─────── -->
+%%VIEW_JS%%
+
+<script>
+function relayoutAll(container) {
+    var root = container || document;
+    root.querySelectorAll(".plotly-graph-div").forEach(function(el) {
+        if (el.id && el._fullLayout) {
+            Plotly.relayout(el.id, { autosize: true });
+        }
+    });
+}
+
+function changeSection() {
+    var selected = document.getElementById("sectionDropdown").value;
+    document.querySelectorAll(".section-panel").forEach(function(p) {
+        p.style.display = "none";
+    });
+    var panel = document.getElementById(selected);
+    if (panel) {
+        panel.style.display = "block";
+        relayoutAll(panel);
+    }
+}
+
+document.addEventListener("DOMContentLoaded", function() {
+    // Briefly show everything so Plotly can measure dimensions
+    document.querySelectorAll(".section-panel, .tab-content").forEach(function(el) {
+        el.style.display = "block";
+    });
+
+    // Let browser paint, then relayout all, then restore hidden state
+    requestAnimationFrame(function() {
+        requestAnimationFrame(function() {
+            document.querySelectorAll(".plotly-graph-div").forEach(function(el) {
+                if (el.id) Plotly.relayout(el.id, { autosize: true });
+            });
+
+            // Now hide everything except first section/tab
+            document.querySelectorAll(".section-panel").forEach(function(sec, i) {
+                sec.style.display = i === 0 ? "block" : "none";
+                sec.querySelectorAll(".tab-content").forEach(function(tab, j) {
+                    tab.style.display = j === 0 ? "block" : "none";
+                });
+            });
+
+            document.getElementById("view-dept").style.display = "block";
+            var deptBtn = document.getElementById("btn-dept");
+            if (deptBtn) deptBtn.classList.add("active-tab");
+        });
+    });
+});
+</script>
+
+</body>
+</html>
