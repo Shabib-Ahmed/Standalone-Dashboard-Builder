@@ -1,10 +1,20 @@
+"""html_builder.py — Dashboard HTML generation library.
+
+Builds interactive HTML dashboards with Plotly charts, tabbed sections,
+and view panels driven by structured Python config objects.
+"""
+
 from __future__ import annotations
 
 import json
+from abc import ABC
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Union
 
-from StatsHelper import StatsHelper
+
+# ---------------------------------------------------------------------------
+# Data-model types
+# ---------------------------------------------------------------------------
 
 @dataclass
 class Tab:
@@ -12,12 +22,13 @@ class Tab:
     label: str
     content_html: str
 
+
 @dataclass
 class Section:
     key: str
     label: str
-    date_range: Optional[Tuple[str, str]] = None
-    tabs: List[Tab] = field(default_factory=list)
+    date_range: tuple[str, str] | None = None
+    tabs: list[Tab] = field(default_factory=list)
 
     @property
     def heading(self) -> str:
@@ -26,57 +37,167 @@ class Section:
         return self.label
 
     def add_tab(self, key: str, label: str, content_html: str) -> "Section":
-        """Append a tab and return *self* for method chaining."""
         self.tabs.append(Tab(key, label, content_html))
         return self
 
-@dataclass
-class ComparisonConfig:
-    data_json: str
-    t_crit_json: str
-    groups: List[str]
-    filter_keys: List[Any]
-    default_filter: Any
-    tab_label: str
-    heading: str
-    filter_label: str
-    value_label: str
-    group_label: str
-    bucket_label: str
+
+# ---------------------------------------------------------------------------
+# Control configs
+# ---------------------------------------------------------------------------
 
 @dataclass
-class SeriesConfig:
-    col: str
+class DropdownControl:
+    """A <select> rendered above charts in a view."""
+    control_id: str
     label: str
-    axis: str = "left"
-    overlay_col: Optional[str] = None
-    overlay_label: str = ""
+    options: list[str]
+    on_change: str = ""
+
 
 @dataclass
-class SecondaryViewConfig:
-    data_json: str
-    categories: List[str]
-    series: List[SeriesConfig]
-    tab_label: str
-    heading: str
-    category_label: str
-    time_col: str
-    time_label: str
+class RangeInputControl:
+    """Two numeric <input> fields (lo / hi) for workload-range filtering."""
+    lo_id: str
+    hi_id: str
+    label: str = "Workload range"
+    result_div_id: str = "range-result"
+
+
+ControlConfig = Union[DropdownControl, RangeInputControl]
+
+
+# ---------------------------------------------------------------------------
+# Graph option types
+# ---------------------------------------------------------------------------
+
+class GraphOptions(ABC):
+    """Abstract base — never instantiated directly."""
+
 
 @dataclass
-class CorrelationConfig:
-    scatter_json: str
-    departments: List[str]
-    group_names: List[str]
-    hour: int
-    col1_key: str
-    col2_key: str
-    col1_label: str
-    col2_label: str
-    tab_label: str
-    heading: str
+class LineOptions(GraphOptions):
+    """One or more series plotted as lines against a shared x-axis."""
+    series: list[dict[str, str]] = field(default_factory=list)
+    x_col: str = ""
+    x_label: str = ""
+    y_label: str = ""
+    title: str = ""
+    connect_gaps: bool = False
+
+
+@dataclass
+class BarOptions(GraphOptions):
+    series: list[dict[str, str]] = field(default_factory=list)
+    x_col: str = ""
+    x_label: str = ""
+    y_label: str = ""
+    title: str = ""
+    barmode: str = "group"  # "group" | "stack" | "overlay"
+
+
+@dataclass
+class DualAxisOptions(GraphOptions):
+    """Left-axis series vs right-axis series, with optional overlay chart."""
+    x_col: str = ""
+    x_label: str = ""
+    left_col: str = ""
+    left_label: str = ""
+    right_col: str = ""
+    right_label: str = ""
+    title: str = ""
+    show_overlay_chart: bool = False
+
+
+@dataclass
+class RangeFilterOptions:
+    """
+    Workload-range filter panel rendered beneath a ScatterOptions chart.
+    Recalculates Pearson r/p on the filtered subset inline.
+    """
+    result_div_id: str = "corr-range-result"
+    lo_input_id: str = "corr-range-lo"
+    hi_input_id: str = "corr-range-hi"
+
+
+@dataclass
+class ScatterOptions(GraphOptions):
+    x_col: str = ""
+    x_label: str = ""
+    y_col: str = ""
+    y_label: str = ""
+    id_col: str = ""    # hover-label column (e.g. department name)
+    time_col: str = ""  # hover-label column (e.g. YearMonth)
+    title: str = ""
+    show_regression: bool = True
+    show_loess: bool = True
+    show_stats_badge: bool = True  # r, p, n annotation in chart title
+    range_filter: RangeFilterOptions | None = None
+
+
+@dataclass
+class TableOptions(GraphOptions):
+    """Renders a plain HTML table from the view data."""
+    columns: list[dict[str, str]] = field(default_factory=list)
+    time_col: str = ""
+    time_label: str = ""
+
+
+@dataclass
+class ComparisonOptions(GraphOptions):
+    """
+    Side-by-side comparison of two groups across time buckets,
+    including a stats table with 95% CI.
+    """
+    groups: list[str] = field(default_factory=list)
+    group_label: str = "Group"
+    filter_keys: list[str] = field(default_factory=list)
+    filter_label: str = "Filter"
+    default_filter: str = ""
+    bucket_label: str = "Bucket"
+    value_label: str = "Value"
+    # Pre-serialised JSON: filter → group → list[{bucket, mean, std, n, ci}]
+    data_json: str = "null"
+    t_crit_json: str = "{}"
+
+
+# ---------------------------------------------------------------------------
+# Graph / view container types
+# ---------------------------------------------------------------------------
+
+@dataclass
+class GraphConfig:
+    div_id: str
+    options: GraphOptions
+    height: int = 500  # pixels; ignored for TableOptions
+
+
+@dataclass
+class ViewConfig:
+    key: str          # unique identifier, also DOM id prefix
+    tab_label: str    # text on the top-tab button
+    heading: str      # <h2> inside the panel
+    description: str = ""
+    data_json: str = "null"
+    controls: list[ControlConfig] = field(default_factory=list)
+    graphs: list[GraphConfig] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# HTMLBuilder
+# ---------------------------------------------------------------------------
 
 class HTMLBuilder:
+    """
+    Assembles a multi-section, multi-view HTML dashboard.
+
+    Usage::
+
+        builder = HTMLBuilder(title="My Dashboard", ...)
+        sec = builder.add_section("q1", "Q1 Results", ("2024-01-01", "2024-03-31"))
+        sec.add_tab("overview", "Overview", "<p>Content here</p>")
+        builder.add_view(ViewConfig(...))
+        builder.save("dashboard.html")
+    """
 
     def __init__(
         self,
@@ -85,22 +206,24 @@ class HTMLBuilder:
         dropdown_label: str,
         plotly_version: str,
         template: str,
-    ):
+    ) -> None:
         self.title = title
         self.main_tab_label = main_tab_label
         self.dropdown_label = dropdown_label
         self.plotly_version = plotly_version
         self.template = template
-        self.sections: List[Section] = []
-        self.comparison: Optional[ComparisonConfig] = None
-        self.secondary: Optional[SecondaryViewConfig] = None
-        self.correlation: Optional[CorrelationConfig] = None
+        self.sections: list[Section] = []
+        self.views: list[ViewConfig] = []
+
+    # ------------------------------------------------------------------
+    # Builder methods
+    # ------------------------------------------------------------------
 
     def add_section(
         self,
         key: str,
         label: str,
-        date_range: Optional[Tuple[str, str]] = None,
+        date_range: tuple[str, str] | None = None,
     ) -> Section:
         sec = Section(key=key, label=label, date_range=date_range)
         self.sections.append(sec)
@@ -113,18 +236,14 @@ class HTMLBuilder:
         button_label: str,
         content_html: str,
     ) -> "HTMLBuilder":
+        """Append a toggle button fragment to an existing tab's content."""
         toggle_fragment = (
             f'<div class="tab-toggle" data-label="{button_label}" '
             f'style="display:none;">{content_html}</div>'
         )
-        for sec in self.sections:
-            if sec.key == section_key:
-                for tab in sec.tabs:
-                    if tab.key == tab_key:
-                        tab.content_html += toggle_fragment
-                        return self
-                raise KeyError(f"No tab with key '{tab_key}' in section '{section_key}'.")
-        raise KeyError(f"No section with key '{section_key}' found.")
+        tab = self._find_tab(section_key, tab_key)
+        tab.content_html += toggle_fragment
+        return self
 
     def add_dropdown(
         self,
@@ -132,123 +251,42 @@ class HTMLBuilder:
         tab_key: str,
         dropdown_id: str,
         label: str,
-        options: List[str],
+        options: list[str],
         on_change_js: str = "",
     ) -> "HTMLBuilder":
-        opts_html = "\n".join(
-            f'<option value="{o}">{o}</option>' for o in options
-        )
+        """Prepend a <select> dropdown to an existing tab's content."""
+        opts_html = "\n".join(f'<option value="{o}">{o}</option>' for o in options)
         onchange_attr = f' onchange="{on_change_js}()"' if on_change_js else ""
         select_html = (
             f'<div style="margin-bottom:12px;">'
             f'<label><strong>{label}:</strong></label>'
             f'<select id="{dropdown_id}"{onchange_attr} style="padding:6px;margin-left:8px;">'
-            f"{opts_html}"
-            f"</select></div>"
+            f"{opts_html}</select></div>"
         )
-        for sec in self.sections:
-            if sec.key == section_key:
-                for tab in sec.tabs:
-                    if tab.key == tab_key:
-                        tab.content_html = select_html + tab.content_html
-                        return self
-                raise KeyError(f"No tab with key '{tab_key}' in section '{section_key}'.")
-        raise KeyError(f"No section with key '{section_key}' found.")
+        tab = self._find_tab(section_key, tab_key)
+        tab.content_html = select_html + tab.content_html
+        return self
 
-    def set_comparison(
-        self,
-        data: dict,
-        groups: List[str],
-        filter_keys: List[Any],
-        default_filter: Any,
-        tab_label: str,
-        heading: str,
-        filter_label: str,
-        value_label: str,
-        group_label: str,
-        bucket_label: str,
-        t_crit: Optional[Dict[int, float]] = None,
-    ) -> None:
-        self.comparison = ComparisonConfig(
-            data_json=json.dumps(data),
-            t_crit_json=json.dumps(t_crit or StatsHelper.t_crit_table()),
-            groups=groups,
-            filter_keys=filter_keys,
-            default_filter=default_filter,
-            tab_label=tab_label,
-            heading=heading,
-            filter_label=filter_label,
-            value_label=value_label,
-            group_label=group_label,
-            bucket_label=bucket_label,
-        )
+    def add_view(self, view: ViewConfig) -> "HTMLBuilder":
+        self.views.append(view)
+        return self
 
-    def set_secondary_view(
-        self,
-        data: dict,
-        categories: List[str],
-        series: List[SeriesConfig],
-        tab_label: str,
-        heading: str,
-        category_label: str,
-        time_col: str,
-        time_label: str,
-    ) -> None:
-        if not series:
-            raise ValueError("set_secondary_view requires at least one SeriesConfig.")
-        self.secondary = SecondaryViewConfig(
-            data_json=json.dumps(data),
-            categories=categories,
-            series=series,
-            tab_label=tab_label,
-            heading=heading,
-            category_label=category_label,
-            time_col=time_col,
-            time_label=time_label,
-        )
-
-    def set_correlation(
-        self,
-        data: dict,
-        hour: int,
-        col1_label: str,
-        col2_label: str,
-        *,
-        tab_label: str = "Correlation",
-        heading: str = "Correlation Analysis",
-    ) -> None:
-        departments = data.pop("__departments__", [])
-        group_names = data.pop("__department_groups__", [])
-        col1_key = data.pop("__col1__", col1_label)
-        col2_key = data.pop("__col2__", col2_label)
-        scatter = data.pop("__scatter__", {})
-        self.correlation = CorrelationConfig(
-            scatter_json=json.dumps(scatter),
-            departments=departments,
-            group_names=group_names,
-            hour=hour,
-            col1_key=col1_key,
-            col2_key=col2_key,
-            col1_label=col1_label,
-            col2_label=col2_label,
-            tab_label=tab_label,
-            heading=heading,
-        )
+    # ------------------------------------------------------------------
+    # Render
+    # ------------------------------------------------------------------
 
     def render(self) -> str:
+        """Render the full HTML string."""
         replacements = {
             "%%PLOTLY_VERSION%%": self.plotly_version,
             "%%TITLE%%": self.title,
             "%%MAIN_TAB_LABEL%%": self.main_tab_label,
             "%%DROPDOWN_LABEL%%": self.dropdown_label,
-            "%%SECTION_DROPDOWN%%": self._dropdown_html(),
+            "%%SECTION_DROPDOWN%%": self._section_dropdown_html(),
             "%%SECTIONS%%": self._sections_html(),
-            "%%COMPARISON_BLOCK%%": self._comparison_html(),
-            "%%COMPARE_TAB_BUTTON%%": self._compare_tab_button(),
-            "%%SECONDARY_BLOCK%%": self._secondary_html(),
-            "%%SECONDARY_TAB_BUTTON%%": self._secondary_tab_button(),
-            "%%CORRELATION_BLOCK%%": self._correlation_html(),
-            "%%CORRELATION_TAB_BUTTON%%": self._correlation_tab_button(),
+            "%%VIEW_TAB_BUTTONS%%": self._view_tab_buttons_html(),
+            "%%VIEWS%%": self._views_html(),
+            "%%VIEW_JS%%": self._view_js(),
         }
         html = self.template
         for marker, value in replacements.items():
@@ -259,22 +297,40 @@ class HTMLBuilder:
         from pathlib import Path
         Path(path).write_text(self.render(), encoding="utf-8")
 
-    def _dropdown_html(self) -> str:
+    # ------------------------------------------------------------------
+    # Private helpers — lookup
+    # ------------------------------------------------------------------
+
+    def _find_tab(self, section_key: str, tab_key: str) -> Tab:
+        for sec in self.sections:
+            if sec.key == section_key:
+                for tab in sec.tabs:
+                    if tab.key == tab_key:
+                        return tab
+                raise KeyError(f"No tab {tab_key!r} in section {section_key!r}.")
+        raise KeyError(f"No section {section_key!r}.")
+
+    # ------------------------------------------------------------------
+    # Private helpers — HTML generation
+    # ------------------------------------------------------------------
+
+    def _section_dropdown_html(self) -> str:
         return "\n".join(
             f'<option value="{s.key}">{s.label}</option>'
             for s in self.sections
         )
 
     def _sections_html(self) -> str:
-        parts = []
+        parts: list[str] = []
         for i, sec in enumerate(self.sections):
             display = "block" if i == 0 else "none"
-            tab_keys_js = json.dumps([t.key for t in sec.tabs])
+            tab_keys_literal = "[" + ",".join(f"'{t.key}'" for t in sec.tabs) + "]"
+
             buttons = "\n".join(
-                f"<button onclick=\"showTab('{sec.key}','{t.key}',"
-                f"{tab_keys_js.replace(chr(34), '&quot;')})\">"
+                f'<button onclick="showTab(this,\'{sec.key}\',\'{t.key}\',{tab_keys_literal})"'
+                f'{" class=\"active-tab\"" if j == 0 else ""}>'
                 f"{t.label}</button>"
-                for t in sec.tabs
+                for j, t in enumerate(sec.tabs)
             )
             tab_divs = "\n".join(
                 f'<div id="{sec.key}_{t.key}" class="tab-content"'
@@ -290,490 +346,699 @@ class HTMLBuilder:
             )
         return "\n".join(parts)
 
-    def _compare_tab_button(self) -> str:
-        if not self.comparison:
-            return ""
-        return (
-            f'<button id="btn-compare" onclick="switchView(\'compare\')">'
-            f"{self.comparison.tab_label}</button>"
+    def _view_tab_buttons_html(self) -> str:
+        return "\n".join(
+            f'<button id="btn-{v.key}" onclick="switchView(\'{v.key}\')">'
+            f"{v.tab_label}</button>"
+            for v in self.views
         )
 
-    def _secondary_tab_button(self) -> str:
-        if not self.secondary:
-            return ""
+    def _views_html(self) -> str:
+        return "\n".join(self._render_view(v) for v in self.views)
+
+    def _render_view(self, v: ViewConfig) -> str:
+        controls_html = "\n".join(self._render_control(c, v.key) for c in v.controls)
+        graphs_html = "\n".join(self._render_graph(g, v.key) for g in v.graphs)
+        desc_html = (
+            f'<p style="margin:0 0 12px;color:#555;">{v.description}</p>'
+            if v.description
+            else ""
+        )
         return (
-            f'<button id="btn-secondary" onclick="switchView(\'secondary\')">'
-            f"{self.secondary.tab_label}</button>"
+            f'<div id="view-{v.key}" style="display:none;">\n'
+            f'  <h2 style="margin:18px 0 8px;">{v.heading}</h2>\n'
+            f"  {desc_html}\n"
+            f'  <div class="view-controls" style="margin-bottom:15px;">\n'
+            f"    {controls_html}\n"
+            f"  </div>\n"
+            f"  {graphs_html}\n"
+            f"</div>\n"
         )
 
-    def _comparison_html(self) -> str:
-        if not self.comparison:
-            return ""
-        c = self.comparison
+    def _render_control(self, c: ControlConfig, view_key: str) -> str:
+        if isinstance(c, DropdownControl):
+            opts_html = "\n".join(
+                f'<option value="{o}">{o}</option>' for o in c.options
+            )
+            on_change = c.on_change or f"updateView('{view_key}')"
+            return (
+                f'<div style="display:inline-block;margin-right:20px;">'
+                f'<label><strong>{c.label}:&nbsp;</strong></label>'
+                f'<select id="{c.control_id}" onchange="{on_change}"'
+                f' style="padding:8px;">'
+                f"{opts_html}</select></div>"
+            )
+        if isinstance(c, RangeInputControl):
+            return (
+                f'<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;'
+                f'margin-bottom:12px;">'
+                f'<span style="font-weight:600;">{c.label}:</span>'
+                f'<label>From&nbsp;<input id="{c.lo_id}" type="number" step="0.01"'
+                f' style="width:90px;padding:4px 6px;font-size:14px;"></label>'
+                f'<label>To&nbsp;<input id="{c.hi_id}" type="number" step="0.01"'
+                f' style="width:90px;padding:4px 6px;font-size:14px;"></label>'
+                f'</div>'
+                f'<div id="{c.result_div_id}"'
+                f' style="font-size:15px;line-height:1.8;font-family:monospace;"></div>'
+            )
+        raise TypeError(f"Unknown ControlConfig type: {type(c)}")
+
+    def _render_graph(self, g: GraphConfig, view_key: str = "") -> str:
+        o = g.options
+        if isinstance(o, (LineOptions, BarOptions, DualAxisOptions, ScatterOptions)):
+            html = (
+                f'<div id="{g.div_id}"'
+                f' style="margin-top:20px;height:{g.height}px;"></div>\n'
+            )
+            if isinstance(o, DualAxisOptions) and o.show_overlay_chart:
+                html += (
+                    f'<div id="{g.div_id}-overlay"'
+                    f' style="margin-top:30px;height:{g.height}px;"></div>\n'
+                )
+            if isinstance(o, ScatterOptions) and o.range_filter:
+                html += self._render_range_filter_panel(o.range_filter)
+            return html
+
+        if isinstance(o, TableOptions):
+            return f'<div id="{g.div_id}" style="margin-top:20px;overflow-x:auto;"></div>\n'
+
+        if isinstance(o, ComparisonOptions):
+            return self._render_comparison_div(g, view_key)
+
+        raise TypeError(f"Unknown GraphOptions type: {type(o)}")
+
+    def _render_range_filter_panel(self, rf: RangeFilterOptions) -> str:
+        return (
+            f'<div style="margin-top:24px;padding:16px 20px;background:#f8f9fa;'
+            f'border:1px solid #dee2e6;border-radius:8px;">\n'
+            f'  <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;'
+            f'margin-bottom:12px;">\n'
+            f'    <span style="font-weight:600;">Workload range:</span>\n'
+            f'    <label>From&nbsp;<input id="{rf.lo_input_id}" type="number" step="0.01"'
+            f' style="width:90px;padding:4px 6px;font-size:14px;"></label>\n'
+            f'    <label>To&nbsp;<input id="{rf.hi_input_id}" type="number" step="0.01"'
+            f' style="width:90px;padding:4px 6px;font-size:14px;"></label>\n'
+            f'  </div>\n'
+            f'  <div id="{rf.result_div_id}"'
+            f' style="font-size:15px;line-height:1.8;font-family:monospace;"></div>\n'
+            f'</div>\n'
+        )
+
+    def _render_comparison_div(self, g: GraphConfig, view_key: str) -> str:
+        o: ComparisonOptions = g.options  # type: ignore[assignment]
         group_opts = "\n".join(
-            f'<option value="{g}">{g}</option>' for g in c.groups
+            f'<option value="{grp}">{grp}</option>' for grp in o.groups
         )
         filter_opts = "\n".join(
-            f'<option value="{k}"{" selected" if k == c.default_filter else ""}>'
+            f'<option value="{k}"{" selected" if k == o.default_filter else ""}>'
             f"{k}</option>"
-            for k in c.filter_keys
+            for k in o.filter_keys
         )
-        return f"""
-<div id="compare-view" style="display:none;">
-    <h2>{c.heading}</h2>
-    <div style="margin-bottom:15px;">
-        <label><strong>{c.group_label} 1:</strong></label>
-        <select id="comp_unit1" onchange="updateComparison()"
-                style="padding:8px;margin-right:20px;">
-            <option value="">-- Select --</option>{group_opts}
-        </select>
-        <label><strong>{c.group_label} 2:</strong></label>
-        <select id="comp_unit2" onchange="updateComparison()"
-                style="padding:8px;margin-right:20px;">
-            <option value="">-- Select --</option>{group_opts}
-        </select>
-        <label><strong>{c.filter_label}:</strong></label>
-        <select id="comp_filter" onchange="updateComparison()" style="padding:8px;">
-            {filter_opts}
-        </select>
-    </div>
-    <div id="comp_chart" style="margin-top:20px;"></div>
-    <div id="comp_table" style="margin-top:20px;overflow-x:auto;"></div>
-</div>
-
-<script>
-var compData    = {c.data_json};
-var tCritTable  = {c.t_crit_json};
-var VALUE_LABEL = {json.dumps(c.value_label)};
-var GROUP_LABEL = {json.dumps(c.group_label)};
-var FILTER_LABEL = {json.dumps(c.filter_label)};
-var BUCKET_LABEL = {json.dumps(c.bucket_label)};
-
-function getTCrit(df) {{
-    df = Math.max(1, Math.round(df));
-    return df >= 120 ? 1.96 : (tCritTable[df] || 1.96);
-}}
-function welchDF(s1,n1,s2,n2) {{
-    var a=(s1*s1)/n1, b=(s2*s2)/n2;
-    var den=(a*a)/(n1-1)+(b*b)/(n2-1);
-    return den>0 ? ((a+b)*(a+b))/den : 1;
-}}
-function fmtDiffCI(r1,r2) {{
-    if(!r1||!r2||r1.n<2||r2.n<2) return "&mdash;";
-    var se=Math.sqrt((r1.std*r1.std)/r1.n+(r2.std*r2.std)/r2.n);
-    var tc=getTCrit(welchDF(r1.std,r1.n,r2.std,r2.n));
-    var d=r1.mean-r2.mean;
-    return (d-tc*se).toFixed(2)+" &ndash; "+(d+tc*se).toFixed(2);
-}}
-
-function updateComparison() {{
-    var u1=document.getElementById("comp_unit1").value;
-    var u2=document.getElementById("comp_unit2").value;
-    var fk=document.getElementById("comp_filter").value;
-
-    if(!u1||!u2||u1===u2) {{
-        document.getElementById("comp_chart").innerHTML =
-            (u1&&u2&&u1===u2)
-                ? "<p style='color:#888;'>Please select two different "+GROUP_LABEL.toLowerCase()+"s.</p>"
-                : "";
-        document.getElementById("comp_table").innerHTML="";
-        return;
-    }}
-
-    var bucket = compData[fk] || {{}};
-    var d1=bucket[u1]||[], d2=bucket[u2]||[];
-
-    var bkSet={{}};
-    d1.forEach(function(r){{bkSet[r.bucket]=1;}});
-    d2.forEach(function(r){{bkSet[r.bucket]=1;}});
-    var bks=Object.keys(bkSet).sort();
-
-    var map1={{}}, map2={{}};
-    d1.forEach(function(r){{map1[r.bucket]=r;}});
-    d2.forEach(function(r){{map2[r.bucket]=r;}});
-
-    Plotly.newPlot("comp_chart",
-        [
-            {{x:bks, y:bks.map(function(m){{return map1[m]?map1[m].mean:null;}}),
-              mode:"lines+markers", name:u1, connectgaps:false}},
-            {{x:bks, y:bks.map(function(m){{return map2[m]?map2[m].mean:null;}}),
-              mode:"lines+markers", name:u2, connectgaps:false}}
-        ],
-        {{title:u1+" vs "+u2+"  "+VALUE_LABEL+" ("+FILTER_LABEL+": "+fk+")",
-          xaxis:{{title:BUCKET_LABEL,tickangle:-45}},
-          yaxis:{{title:VALUE_LABEL}}, height:500}}
-    );
-
-    function fmt(v){{return v!=null?v.toFixed(2):"";}}
-    function fmtCI(r){{return r?(r.mean-r.ci).toFixed(2)+" &ndash; "+(r.mean+r.ci).toFixed(2):"";}}
-
-    var hdr="<th>Metric</th>";
-    bks.forEach(function(m){{hdr+="<th>"+m+"</th>";}});
-
-    var labels=[u1+" Avg",u2+" Avg","Difference",
-                u1+" 95% CI",u2+" 95% CI","Difference 95% CI"];
-    var cells=labels.map(function(){{return"";}});
-
-    bks.forEach(function(m){{
-        var v1=map1[m]?map1[m].mean:null, v2=map2[m]?map2[m].mean:null;
-        var diff=(v1!=null&&v2!=null)?(v1-v2):null;
-        cells[0]+="<td>"+fmt(v1)+"</td>";
-        cells[1]+="<td>"+fmt(v2)+"</td>";
-        cells[2]+="<td>"+fmt(diff)+"</td>";
-        cells[3]+="<td>"+fmtCI(map1[m])+"</td>";
-        cells[4]+="<td>"+fmtCI(map2[m])+"</td>";
-        cells[5]+="<td>"+fmtDiffCI(map1[m],map2[m])+"</td>";
-    }});
-
-    var tbody="";
-    labels.forEach(function(l,i){{tbody+="<tr><td>"+l+"</td>"+cells[i]+"</tr>";}});
-    document.getElementById("comp_table").innerHTML=
-        "<table><thead><tr>"+hdr+"</tr></thead><tbody>"+tbody+"</tbody></table>";
-}}
-</script>
-"""
-
-    def _secondary_html(self) -> str:
-        if not self.secondary:
-            return ""
-        sv = self.secondary
-
-        cat_opts = "\n".join(
-            f'<option value="{d}"{" selected" if i == 0 else ""}>'
-            f"{d}</option>"
-            for i, d in enumerate(sv.categories)
-        )
-        overlay_divs = "\n".join(
-            f'<div id="sv_overlay_{i}" style="margin-top:30px;"></div>'
-            for i, s in enumerate(sv.series)
-            if s.overlay_col
-        )
-        series_js = json.dumps([
-            {
-                "col": s.col,
-                "label": s.label,
-                "axis": s.axis,
-                "overlayCol": s.overlay_col or "",
-                "overlayLabel": s.overlay_label,
-            }
-            for s in sv.series
-        ])
-
-        return f"""
-<div id="secondary-view" style="display:none;">
-    <h2>{sv.heading}</h2>
-    <div style="margin-bottom:15px;">
-        <label><strong>{sv.category_label}:</strong></label>
-        <select id="sv_cat" onchange="updateSecondary()" style="padding:8px;margin-right:20px;">
-            {cat_opts}
-        </select>
-    </div>
-    <div id="sv_chart" style="margin-top:20px;"></div>
-    {overlay_divs}
-    <div id="sv_table" style="margin-top:20px;overflow-x:auto;"></div>
-</div>
-
-<script>
-var svData        = {sv.data_json};
-var SV_SERIES     = {series_js};
-var SV_TIME_COL   = {json.dumps(sv.time_col)};
-var SV_TIME_LABEL = {json.dumps(sv.time_label)};
-var SV_CAT_LABEL  = {json.dumps(sv.category_label)};
-
-function updateSecondary() {{
-    var cat     = document.getElementById("sv_cat").value;
-    var records = svData[cat] || [];
-
-    if (records.length === 0) {{
-        document.getElementById("sv_chart").innerHTML =
-            "<p style='color:#888;'>No data for this " + SV_CAT_LABEL.toLowerCase() + ".</p>";
-        document.getElementById("sv_table").innerHTML = "";
-        SV_SERIES.forEach(function(s, i) {{
-            if (s.overlayCol) {{
-                var el = document.getElementById("sv_overlay_" + i);
-                if (el) el.innerHTML = "";
-            }}
-        }});
-        return;
-    }}
-
-    var xVals = records.map(function(r) {{ return r[SV_TIME_COL]; }});
-
-    var traces = [];
-    var layout = {{
-        title: cat + " \u2014 Chronological Stats",
-        xaxis: {{ title: SV_TIME_LABEL, tickangle: -45 }},
-        height: 520,
-        legend: {{ x: 0.01, y: 1.15, orientation: "h" }}
-    }};
-
-    var leftCount = 0, rightCount = 0;
-    SV_SERIES.forEach(function(s) {{
-        var yVals    = records.map(function(r) {{ return r[s.col]; }});
-        var isRight  = (s.axis === "right");
-        var yAxisKey = isRight ? "y2" : "y";
-
-        traces.push({{ x: xVals, y: yVals, mode: "lines+markers", name: s.label, yaxis: yAxisKey }});
-
-        if (isRight) {{
-            if (rightCount === 0) layout.yaxis2 = {{ title: s.label, side: "right", overlaying: "y" }};
-            rightCount++;
-        }} else {{
-            if (leftCount === 0) layout.yaxis = {{ title: s.label, side: "left" }};
-            leftCount++;
-        }}
-    }});
-
-    Plotly.newPlot("sv_chart", traces, layout);
-
-    SV_SERIES.forEach(function(s, i) {{
-        if (!s.overlayCol) return;
-        var divId = "sv_overlay_" + i;
-        var el    = document.getElementById(divId);
-        if (!el) return;
-
-        var yVals = records.map(function(r) {{ return r[s.col]; }});
-        var oVals = records.map(function(r) {{ return r[s.overlayCol]; }});
-
-        Plotly.newPlot(divId, [
-            {{ x: xVals, y: yVals, mode: "lines+markers", name: s.label,        yaxis: "y"  }},
-            {{ x: xVals, y: oVals, mode: "lines+markers", name: s.overlayLabel, yaxis: "y2" }}
-        ], {{
-            title:  cat + " \u2014 " + s.label + " vs " + s.overlayLabel,
-            xaxis:  {{ title: SV_TIME_LABEL, tickangle: -45 }},
-            yaxis:  {{ title: s.label,        side: "left"  }},
-            yaxis2: {{ title: s.overlayLabel, side: "right", overlaying: "y" }},
-            height: 520,
-            legend: {{ x: 0.01, y: 1.15, orientation: "h" }}
-        }});
-    }});
-
-    var hdr = "<th>" + SV_TIME_LABEL + "</th>";
-    SV_SERIES.forEach(function(s) {{ hdr += "<th>" + s.label + "</th>"; }});
-    var shownOverlays = {{}};
-    SV_SERIES.forEach(function(s) {{
-        if (s.overlayCol && !shownOverlays[s.overlayCol]) {{
-            hdr += "<th>" + s.overlayLabel + "</th>";
-            shownOverlays[s.overlayCol] = true;
-        }}
-    }});
-
-    function fmt(v) {{ return (v != null && v !== undefined) ? Number(v).toFixed(2) : ""; }}
-    var tbody = "";
-    records.forEach(function(r) {{
-        var row = "<td>" + r[SV_TIME_COL] + "</td>";
-        SV_SERIES.forEach(function(s) {{ row += "<td>" + fmt(r[s.col]) + "</td>"; }});
-        var seenOverlay = {{}};
-        SV_SERIES.forEach(function(s) {{
-            if (s.overlayCol && !seenOverlay[s.overlayCol]) {{
-                row += "<td>" + fmt(r[s.overlayCol]) + "</td>";
-                seenOverlay[s.overlayCol] = true;
-            }}
-        }});
-        tbody += "<tr>" + row + "</tr>";
-    }});
-    document.getElementById("sv_table").innerHTML =
-        "<table><thead><tr>" + hdr + "</tr></thead><tbody>" + tbody + "</tbody></table>";
-}}
-
-document.addEventListener("DOMContentLoaded", function() {{
-    var origSwitch = window.switchView;
-    window.switchView = function(view) {{
-        if (origSwitch) origSwitch(view);
-        if (view === "secondary") updateSecondary();
-    }};
-}});
-</script>
-"""
-    def _correlation_tab_button(self) -> str:
-        if not self.correlation:
-            return ""
+        update_call = f"updateView('{view_key}')"
         return (
-            f'<button id="btn-correlation" '
-            f"onclick=\"switchView('correlation'); setTimeout(window._corrRender, 100);\">"
-            f"{self.correlation.tab_label}</button>"
-        )
-
-    def _correlation_html(self) -> str:
-        if not self.correlation:
-            return ""
-        c = self.correlation
-
-        dept_options = (
-            '<option value="Overall">Overall (all departments)</option>'
-            + "".join(f'<option value="{g}">{g}</option>' for g in c.group_names)
-            + "".join(f'<option value="{d}">{d}</option>' for d in c.departments)
-        )
-
-        js = (
-            "<script>\n"
-            "var _CORR_SCATTER  = " + c.scatter_json + ";\n"
-            "var _CORR_HOUR     = " + str(c.hour) + ";\n"
-            "var _CORR_COL1_KEY = " + json.dumps(c.col1_key) + ";\n"
-            "var _CORR_COL2_KEY = " + json.dumps(c.col2_key) + ";\n"
-            "var _CORR_COL1_LBL = " + json.dumps(c.col1_label) + ";\n"
-            "var _CORR_COL2_LBL = " + json.dumps(c.col2_label) + ";\n"
-            "\n"
-            "function _lnGamma(z) {\n"
-            "  var c = [76.18009172947146,-86.50532032941677,24.01409824083091,\n"
-            "           -1.231739572450155,0.001208650973866179,-0.000005395239384953];\n"
-            "  var s = 1.000000000190015;\n"
-            "  for (var i=0;i<6;i++) s+=c[i]/(z+i+1);\n"
-            "  return Math.log(2.5066282746310005*s/z)+(z+0.5)*Math.log(z+5.5)-(z+5.5);\n"
-            "}\n"
-            "function _betaCF(a,b,x) {\n"
-            "  var m2,aa,del,qab=a+b,qap=a+1,qam=a-1;\n"
-            "  var c=1,d=1-qab*x/qap; if(Math.abs(d)<1e-30)d=1e-30;\n"
-            "  d=1/d; var h=d;\n"
-            "  for(var m=1;m<=200;m++) {\n"
-            "    m2=2*m;\n"
-            "    aa=m*(b-m)*x/((qam+m2)*(a+m2));\n"
-            "    d=1+aa*d; if(Math.abs(d)<1e-30)d=1e-30; d=1/d;\n"
-            "    c=1+aa/c; if(Math.abs(c)<1e-30)c=1e-30;\n"
-            "    h*=d*c;\n"
-            "    aa=-(a+m)*(qab+m)*x/((a+m2)*(qap+m2));\n"
-            "    d=1+aa*d; if(Math.abs(d)<1e-30)d=1e-30; d=1/d;\n"
-            "    c=1+aa/c; if(Math.abs(c)<1e-30)c=1e-30;\n"
-            "    del=d*c; h*=del;\n"
-            "    if(Math.abs(del-1)<1e-10)break;\n"
-            "  }\n"
-            "  return h;\n"
-            "}\n"
-            "function _betaInc(a,b,x) {\n"
-            "  if(x<=0)return 0; if(x>=1)return 1;\n"
-            "  var bt=Math.exp(_lnGamma(a+b)-_lnGamma(a)-_lnGamma(b)\n"
-            "         +a*Math.log(x)+b*Math.log(1-x));\n"
-            "  if(x<(a+1)/(a+b+2)) return bt*_betaCF(a,b,x)/a;\n"
-            "  return 1-bt*_betaCF(b,a,1-x)/b;\n"
-            "}\n"
-            "function _pearson(xArr,yArr) {\n"
-            "  var n=xArr.length;\n"
-            "  if(n<3) return {r:null,p:null,n:n};\n"
-            "  var sx=0,sy=0,sxy=0,sx2=0,sy2=0;\n"
-            "  for(var i=0;i<n;i++) {\n"
-            "    sx+=xArr[i]; sy+=yArr[i];\n"
-            "    sxy+=xArr[i]*yArr[i]; sx2+=xArr[i]*xArr[i]; sy2+=yArr[i]*yArr[i];\n"
-            "  }\n"
-            "  var num=n*sxy-sx*sy;\n"
-            "  var den=Math.sqrt((n*sx2-sx*sx)*(n*sy2-sy*sy));\n"
-            "  if(den===0) return {r:null,p:null,n:n};\n"
-            "  var r=num/den, df=n-2, t2=r*r*df/(1-r*r);\n"
-            "  var p=_betaInc(df/2,0.5,df/(df+t2));\n"
-            "  return {r:r,p:p,n:n};\n"
-            "}\n"
-            "function _corrScatter(divId,info,metricLabel,deptLabel) {\n"
-            "  if(!info) return;\n"
-            "  var hover=info.timepoints.map(function(ym,i) {\n"
-            "    var s='YearMonth: '+ym;\n"
-            "    if(info.ids&&info.ids[i]) s+='<br>Dept: '+info.ids[i];\n"
-            "    return s;\n"
-            "  });\n"
-            "  var traces=[{x:info.x,y:info.y,mode:'markers',type:'scatter',name:'Data',\n"
-            "    text:hover,\n"
-            "    hovertemplate:'%{text}<br>Workload: %{x:.3f}<br>'+metricLabel+': %{y:.3f}<extra></extra>',\n"
-            "    marker:{size:7,opacity:0.7,color:'#4C78A8'}}];\n"
-            "  if(info.slope!==null&&info.x.length>=2) {\n"
-            "    var xMin=Math.min.apply(null,info.x), xMax=Math.max.apply(null,info.x);\n"
-            "    var pad=(xMax-xMin)*0.05||0.1;\n"
-            "    traces.push({x:[xMin-pad,xMax+pad],\n"
-            "      y:[info.slope*(xMin-pad)+info.intercept,info.slope*(xMax+pad)+info.intercept],\n"
-            "      mode:'lines',name:'Linear',line:{color:'#F58518',dash:'dash',width:2}});\n"
-            "  }\n"
-            "  if(info.loess_x&&info.loess_x.length>=2) {\n"
-            "    traces.push({x:info.loess_x,y:info.loess_y,mode:'lines',name:'LOESS',\n"
-            "      line:{color:'#E45756',width:2.5,shape:'spline'}});\n"
-            "  }\n"
-            "  var rTxt=info.r!==null?'r = '+info.r.toFixed(4):'r = N/A';\n"
-            "  var pTxt=info.p!==null\n"
-            "    ?'p = '+(info.p<0.0001?info.p.toExponential(2):info.p.toFixed(4)):'';\n"
-            "  var sub=rTxt+'    '+pTxt+'    n = '+info.n;\n"
-            "  Plotly.newPlot(divId,traces,{\n"
-            "    title:{text:'Workload @'+_CORR_HOUR+':00  vs  '+metricLabel\n"
-            "           +' ('+deptLabel+')<br>'\n"
-            "           +'<span style=\"font-size:13px;color:#666;\">'+sub+'</span>'},\n"
-            "    xaxis:{title:'Avg Workload per Employee (@'+_CORR_HOUR+':00)'},\n"
-            "    yaxis:{title:metricLabel},\n"
-            "    showlegend:true,legend:{orientation:'h',y:-0.2},\n"
-            "    margin:{t:80,b:60},hovermode:'closest'\n"
-            "  },{responsive:true});\n"
-            "}\n"
-            "function _corrUpdateRange() {\n"
-            "  var deptKey=document.getElementById('corr-dept-select').value;\n"
-            "  var lo=parseFloat(document.getElementById('corr-range-lo').value);\n"
-            "  var hi=parseFloat(document.getElementById('corr-range-hi').value);\n"
-            "  var sd=_CORR_SCATTER[deptKey];\n"
-            "  if(!sd) return;\n"
-            "  var useRange=isFinite(lo)&&isFinite(hi);\n"
-            "  function avg(arr){if(!arr.length)return null;var s=0;for(var i=0;i<arr.length;i++)s+=arr[i];return s/arr.length;}\n"
-            "  function calc(info) {\n"
-            "    if(!info) return {r:null,p:null,n:0,avgX:null,avgY:null};\n"
-            "    var xArr=info.x,yArr=info.y;\n"
-            "    if(useRange){xArr=[];yArr=[];for(var i=0;i<info.x.length;i++){if(info.x[i]>=lo&&info.x[i]<=hi){xArr.push(info.x[i]);yArr.push(info.y[i]);}}}\n"
-            "    var res=_pearson(xArr,yArr); res.avgX=avg(xArr); res.avgY=avg(yArr); return res;\n"
-            "  }\n"
-            "  function fmt(res,label) {\n"
-            "    var r=res.r!==null?res.r.toFixed(4):'N/A';\n"
-            "    var p=res.p!==null?(res.p<0.0001?res.p.toExponential(2):res.p.toFixed(4)):'N/A';\n"
-            "    var ax=res.avgX!==null?res.avgX.toFixed(2):'N/A';\n"
-            "    var ay=res.avgY!==null?res.avgY.toFixed(2):'N/A';\n"
-            "    return '<strong>'+label+':</strong>&nbsp;&nbsp;'\n"
-            "           +'r = '+r+'&nbsp;&nbsp;&nbsp;'\n"
-            "           +'p = '+p+'&nbsp;&nbsp;&nbsp;'\n"
-            "           +'n = '+res.n+'&nbsp;&nbsp;&nbsp;'\n"
-            "           +'Avg Workload = '+ax+'&nbsp;&nbsp;&nbsp;'\n"
-            "           +'Avg Falls/Pressure = '+ay;\n"
-            "  }\n"
-            "  var r1=calc(sd[_CORR_COL1_KEY]), r2=calc(sd[_CORR_COL2_KEY]);\n"
-            "  document.getElementById('corr-range-result').innerHTML=fmt(r1,_CORR_COL1_LBL)+'<br>'+fmt(r2,_CORR_COL2_LBL);\n"
-            "}\n"
-            "function _corrSetDefaults() {\n"
-            "  var deptKey=document.getElementById('corr-dept-select').value;\n"
-            "  var sd=_CORR_SCATTER[deptKey];\n"
-            "  if(!sd) return;\n"
-            "  var info=sd[_CORR_COL1_KEY]||sd[_CORR_COL2_KEY];\n"
-            "  if(!info||!info.x.length) return;\n"
-            "  var xMin=Math.min.apply(null,info.x), xMax=Math.max.apply(null,info.x);\n"
-            "  var loEl=document.getElementById('corr-range-lo'), hiEl=document.getElementById('corr-range-hi');\n"
-            "  loEl.value=xMin.toFixed(2); hiEl.value=xMax.toFixed(2);\n"
-            "  loEl.step=((xMax-xMin)/20).toFixed(4); hiEl.step=loEl.step;\n"
-            "}\n"
-            "window._corrRender=function() {\n"
-            "  var deptKey=document.getElementById('corr-dept-select').value;\n"
-            "  var sd=_CORR_SCATTER[deptKey];\n"
-            "  if(sd){_corrScatter('corr-chart-1',sd[_CORR_COL1_KEY],_CORR_COL1_LBL,sd.label);\n"
-            "          _corrScatter('corr-chart-2',sd[_CORR_COL2_KEY],_CORR_COL2_LBL,sd.label);}\n"
-            "  _corrSetDefaults(); _corrUpdateRange();\n"
-            "};\n"
-            "document.getElementById('corr-dept-select').addEventListener('change',window._corrRender);\n"
-            "document.getElementById('corr-range-lo').addEventListener('input',_corrUpdateRange);\n"
-            "document.getElementById('corr-range-hi').addEventListener('input',_corrUpdateRange);\n"
-            "</script>\n"
-        )
-
-        return (
-            '<div id="correlation-view" style="display:none;">\n'
-            f'  <h2 style="margin:18px 0 8px;">{c.heading}</h2>\n'
-            f'  <p style="margin:0 0 12px;color:#555;">\n'
-            f'    Avg workload per employee at {c.hour}:00 vs monthly {c.col1_label} and {c.col2_label} averages.\n'
-            f'  </p>\n'
-            f'  <div style="margin-bottom:16px;">\n'
-            f'    <label for="corr-dept-select" style="font-weight:600;">Department:&nbsp;</label>\n'
-            f'    <select id="corr-dept-select" style="padding:4px 8px;font-size:14px;">\n'
-            f'      {dept_options}\n'
-            f'    </select>\n'
-            f'  </div>\n'
-            f'  <div style="display:flex;flex-wrap:wrap;gap:24px;">\n'
-            f'    <div id="corr-chart-1" style="flex:1 1 480px;min-width:360px;height:480px;"></div>\n'
-            f'    <div id="corr-chart-2" style="flex:1 1 480px;min-width:360px;height:480px;"></div>\n'
-            f'  </div>\n'
-            f'  <div style="margin-top:24px;padding:16px 20px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:8px;">\n'
-            f'    <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;margin-bottom:12px;">\n'
-            f'      <span style="font-weight:600;">Workload range:</span>\n'
-            f'      <label>From&nbsp;<input id="corr-range-lo" type="number" step="0.01" style="width:90px;padding:4px 6px;font-size:14px;"></label>\n'
-            f'      <label>To&nbsp;<input id="corr-range-hi" type="number" step="0.01" style="width:90px;padding:4px 6px;font-size:14px;"></label>\n'
-            f'    </div>\n'
-            f'    <div id="corr-range-result" style="font-size:15px;line-height:1.8;font-family:monospace;"></div>\n'
-            f'  </div>\n'
+            f'<div id="{g.div_id}-selectors" style="margin-bottom:15px;">\n'
+            f'  <label><strong>{o.group_label} 1:</strong></label>\n'
+            f'  <select id="{g.div_id}-unit1" onchange="{update_call}"'
+            f' style="padding:8px;margin-right:20px;">\n'
+            f'    <option value="">-- Select --</option>{group_opts}\n'
+            f'  </select>\n'
+            f'  <label><strong>{o.group_label} 2:</strong></label>\n'
+            f'  <select id="{g.div_id}-unit2" onchange="{update_call}"'
+            f' style="padding:8px;margin-right:20px;">\n'
+            f'    <option value="">-- Select --</option>{group_opts}\n'
+            f'  </select>\n'
+            f'  <label><strong>{o.filter_label}:</strong></label>\n'
+            f'  <select id="{g.div_id}-filter" onchange="{update_call}"'
+            f' style="padding:8px;">{filter_opts}</select>\n'
             f'</div>\n'
-            + js
+            f'<div id="{g.div_id}-chart" style="margin-top:20px;"></div>\n'
+            f'<div id="{g.div_id}-table" style="margin-top:20px;overflow-x:auto;"></div>\n'
         )
+
+    # ------------------------------------------------------------------
+    # Private helpers — JavaScript generation
+    # ------------------------------------------------------------------
+
+    def _view_js(self) -> str:
+        blocks = [self._js_shared_utils()]
+        for v in self.views:
+            blocks.append(self._js_for_view(v))
+        blocks.append(self._js_dispatcher())
+        return "<script>\n" + "\n".join(blocks) + "\n</script>\n"
+
+    def _js_shared_utils(self) -> str:
+        return r"""
+// ── Tab / section navigation ───────────────────────────────────────────────
+
+function showTab(btn, sectionKey, tabKey, allTabKeys) {
+  allTabKeys.forEach(function(k) {
+    var el = document.getElementById(sectionKey + "_" + k);
+    if (el) el.style.display = "none";
+  });
+  var target = document.getElementById(sectionKey + "_" + tabKey);
+  if (target) {
+    target.style.display = "block";
+    target.querySelectorAll(".plotly-graph-div").forEach(function(el) {
+      if (el.id) Plotly.relayout(el.id, { autosize: true, width: null });
+    });
+  }
+  var tabBar = document.querySelector("#" + sectionKey + " .tabs");
+  if (tabBar) {
+    tabBar.querySelectorAll("button").forEach(function(b) {
+      b.classList.remove("active-tab");
+    });
+  }
+  btn.classList.add("active-tab");
+}
+
+// ── Statistical utilities ─────────────────────────────────────────────────
+
+function _lnGamma(z) {
+  var c = [76.18009172947146, -86.50532032941677, 24.01409824083091,
+           -1.231739572450155, 0.001208650973866179, -0.000005395239384953];
+  var s = 1.000000000190015;
+  for (var i = 0; i < 6; i++) s += c[i] / (z + i + 1);
+  return Math.log(2.5066282746310005 * s / z) + (z + 0.5) * Math.log(z + 5.5) - (z + 5.5);
+}
+
+function _betaCF(a, b, x) {
+  var m2, aa, del, qab = a + b, qap = a + 1, qam = a - 1;
+  var c = 1, d = 1 - qab * x / qap;
+  if (Math.abs(d) < 1e-30) d = 1e-30;
+  d = 1 / d;
+  var h = d;
+  for (var m = 1; m <= 200; m++) {
+    m2 = 2 * m;
+    aa = m * (b - m) * x / ((qam + m2) * (a + m2));
+    d = 1 + aa * d; if (Math.abs(d) < 1e-30) d = 1e-30; d = 1 / d;
+    c = 1 + aa / c; if (Math.abs(c) < 1e-30) c = 1e-30; h *= d * c;
+    aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2));
+    d = 1 + aa * d; if (Math.abs(d) < 1e-30) d = 1e-30; d = 1 / d;
+    c = 1 + aa / c; if (Math.abs(c) < 1e-30) c = 1e-30;
+    del = d * c; h *= del;
+    if (Math.abs(del - 1) < 1e-10) break;
+  }
+  return h;
+}
+
+function _betaInc(a, b, x) {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  var bt = Math.exp(_lnGamma(a + b) - _lnGamma(a) - _lnGamma(b)
+             + a * Math.log(x) + b * Math.log(1 - x));
+  if (x < (a + 1) / (a + b + 2)) return bt * _betaCF(a, b, x) / a;
+  return 1 - bt * _betaCF(b, a, 1 - x) / b;
+}
+
+function _pearson(xArr, yArr) {
+  var n = xArr.length;
+  if (n < 3) return { r: null, p: null, n: n };
+  var sx = 0, sy = 0, sxy = 0, sx2 = 0, sy2 = 0;
+  for (var i = 0; i < n; i++) {
+    sx += xArr[i]; sy += yArr[i];
+    sxy += xArr[i] * yArr[i]; sx2 += xArr[i] * xArr[i]; sy2 += yArr[i] * yArr[i];
+  }
+  var num = n * sxy - sx * sy;
+  var den = Math.sqrt((n * sx2 - sx * sx) * (n * sy2 - sy * sy));
+  if (den === 0) return { r: null, p: null, n: n };
+  var r = num / den, df = n - 2, t2 = r * r * df / (1 - r * r);
+  var p = _betaInc(df / 2, 0.5, df / (df + t2));
+  return { r: r, p: p, n: n };
+}
+
+// Populated externally if needed (e.g. via HTMLBuilder.t_crit_table).
+var _T_CRIT_TABLE = {};
+
+function _getTCrit(df) {
+  df = Math.max(1, Math.round(df));
+  return df >= 120 ? 1.96 : (_T_CRIT_TABLE[df] || 1.96);
+}
+
+function _welchDF(s1, n1, s2, n2) {
+  var a = (s1 * s1) / n1, b = (s2 * s2) / n2;
+  var den = (a * a) / (n1 - 1) + (b * b) / (n2 - 1);
+  return den > 0 ? ((a + b) * (a + b)) / den : 1;
+}
+
+function _fmtNum(v)      { return (v != null && v !== undefined) ? Number(v).toFixed(2) : ""; }
+function _fmtCI(r)       { return r ? (r.mean - r.ci).toFixed(2) + " &ndash; " + (r.mean + r.ci).toFixed(2) : ""; }
+
+function _fmtDiffCI(r1, r2) {
+  if (!r1 || !r2 || r1.n < 2 || r2.n < 2) return "&mdash;";
+  var se = Math.sqrt((r1.std * r1.std) / r1.n + (r2.std * r2.std) / r2.n);
+  var tc = _getTCrit(_welchDF(r1.std, r1.n, r2.std, r2.n));
+  var d  = r1.mean - r2.mean;
+  return (d - tc * se).toFixed(2) + " &ndash; " + (d + tc * se).toFixed(2);
+}
+
+// ── Graph-renderer registry ───────────────────────────────────────────────
+
+var _GRAPH_RENDERERS = {};
+function _registerRenderer(type, fn) { _GRAPH_RENDERERS[type] = fn; }
+
+// ── View data registry ────────────────────────────────────────────────────
+
+var _VIEW_DATA    = {};
+var _VIEW_CONFIGS = {};
+
+function _registerView(key, data, configs) {
+  _VIEW_DATA[key]    = data;
+  _VIEW_CONFIGS[key] = configs;
+}
+"""
+
+    def _js_for_view(self, v: ViewConfig) -> str:
+        configs_js = json.dumps([self._graph_config_to_js_obj(g) for g in v.graphs])
+        lines = [
+            f"// ── View: {v.key} ────────────────────────────────────────────────",
+            f"_registerView({json.dumps(v.key)}, {v.data_json}, {configs_js});",
+        ]
+        # Wire up range-filter inputs for any scatter that has one
+        for g in v.graphs:
+            if isinstance(g.options, ScatterOptions) and g.options.range_filter:
+                rf = g.options.range_filter
+                lines.append(
+                    f"document.addEventListener('DOMContentLoaded', function() {{"
+                    f"  ['{ rf.lo_input_id }', '{ rf.hi_input_id }'].forEach(function(id) {{"
+                    f"    var el = document.getElementById(id);"
+                    f"    if (el) el.addEventListener('input', function() {{"
+                    f"      updateView({json.dumps(v.key)});"
+                    f"    }});"
+                    f"  }});"
+                    f"}});"
+                )
+        return "\n".join(lines)
+
+    def _graph_config_to_js_obj(self, g: GraphConfig) -> dict[str, Any]:
+        """Convert a GraphConfig to a plain dict for JSON serialisation into JS."""
+        o = g.options
+        base: dict[str, Any] = {"divId": g.div_id, "height": g.height}
+
+        if isinstance(o, LineOptions):
+            return {**base, "type": "line", "series": o.series,
+                    "xCol": o.x_col, "xLabel": o.x_label,
+                    "yLabel": o.y_label, "title": o.title,
+                    "connectGaps": o.connect_gaps}
+
+        if isinstance(o, BarOptions):
+            return {**base, "type": "bar", "series": o.series,
+                    "xCol": o.x_col, "xLabel": o.x_label,
+                    "yLabel": o.y_label, "title": o.title,
+                    "barmode": o.barmode}
+
+        if isinstance(o, DualAxisOptions):
+            return {**base, "type": "dual_axis",
+                    "xCol": o.x_col, "xLabel": o.x_label,
+                    "leftCol": o.left_col, "leftLabel": o.left_label,
+                    "rightCol": o.right_col, "rightLabel": o.right_label,
+                    "title": o.title,
+                    "showOverlay": o.show_overlay_chart,
+                    "overlayDivId": f"{g.div_id}-overlay"}
+
+        if isinstance(o, ScatterOptions):
+            rf_obj = None
+            if o.range_filter:
+                rf_obj = {
+                    "loId": o.range_filter.lo_input_id,
+                    "hiId": o.range_filter.hi_input_id,
+                    "resultId": o.range_filter.result_div_id,
+                }
+            return {**base, "type": "scatter",
+                    "xCol": o.x_col, "xLabel": o.x_label,
+                    "yCol": o.y_col, "yLabel": o.y_label,
+                    "idCol": o.id_col, "timeCol": o.time_col,
+                    "title": o.title,
+                    "showRegression": o.show_regression,
+                    "showLoess": o.show_loess,
+                    "showStatsBadge": o.show_stats_badge,
+                    "rangeFilter": rf_obj}
+
+        if isinstance(o, TableOptions):
+            return {**base, "type": "table",
+                    "columns": o.columns,
+                    "timeCol": o.time_col, "timeLabel": o.time_label}
+
+        if isinstance(o, ComparisonOptions):
+            return {**base, "type": "comparison",
+                    "groups": o.groups, "groupLabel": o.group_label,
+                    "filterKeys": o.filter_keys, "filterLabel": o.filter_label,
+                    "defaultFilter": o.default_filter,
+                    "bucketLabel": o.bucket_label, "valueLabel": o.value_label,
+                    "data": json.loads(o.data_json),
+                    "tCrit": json.loads(o.t_crit_json)}
+
+        raise TypeError(f"Unhandled GraphOptions type: {type(o)!r}")
+
+    def _js_dispatcher(self) -> str:
+        # Map each view key to its primary (first) dropdown control id, if any.
+        view_primary_dropdowns: dict[str, str] = {}
+        for v in self.views:
+            for c in v.controls:
+                if isinstance(c, DropdownControl):
+                    view_primary_dropdowns[v.key] = c.control_id
+                    break
+
+        return r"""
+// ── updateView — single dispatcher ────────────────────────────────────────
+
+var _VIEW_PRIMARY_DROPDOWN = """ + json.dumps(view_primary_dropdowns) + r""";
+
+function updateView(viewKey) {
+  var data    = _VIEW_DATA[viewKey];
+  var configs = _VIEW_CONFIGS[viewKey];
+  if (!configs) return;
+
+  var ddId    = _VIEW_PRIMARY_DROPDOWN[viewKey];
+  var cat     = ddId ? ((document.getElementById(ddId) || {}).value || "") : "";
+  var records = (data && cat) ? (data[cat] || []) : (data || []);
+
+  configs.forEach(function(cfg) {
+    var fn = _GRAPH_RENDERERS[cfg.type];
+    if (fn) fn(cfg, records, cat, data);
+  });
+}
+
+// ── switchView — show/hide view panels ────────────────────────────────────
+
+function switchView(viewKey) {
+  document.querySelectorAll('[id^="view-"]').forEach(function(el) {
+    el.style.display = "none";
+  });
+  document.querySelectorAll('.view-tabs button').forEach(function(b) {
+    b.classList.remove("active-tab");
+  });
+  var btn = document.getElementById("btn-" + viewKey);
+  if (btn) btn.classList.add("active-tab");
+  var panel = document.getElementById("view-" + viewKey);
+  if (panel) panel.style.display = "block";
+  updateView(viewKey);
+}
+
+// ── Renderer: line ─────────────────────────────────────────────────────────
+
+_registerRenderer("line", function(cfg, records, cat) {
+  var el = document.getElementById(cfg.divId);
+  var xVals = records.map(function(r) { return r[cfg.xCol]; });
+  var traces = cfg.series.map(function(s) {
+    return { x: xVals, y: records.map(function(r) { return r[s.col]; }),
+             mode: "lines+markers", name: s.label, connectgaps: cfg.connectGaps };
+  });
+  Plotly.newPlot(cfg.divId, traces, {
+    title: cfg.title || cat,
+    xaxis: { title: cfg.xLabel, tickangle: -45 },
+    yaxis: { title: cfg.yLabel },
+    height: cfg.height,
+    legend: { x: 0.01, y: 1.15, orientation: "h" }
+  });
+});
+
+// ── Renderer: bar ──────────────────────────────────────────────────────────
+
+_registerRenderer("bar", function(cfg, records, cat) {
+  var el = document.getElementById(cfg.divId);
+  var xVals = records.map(function(r) { return r[cfg.xCol]; });
+  var traces = cfg.series.map(function(s) {
+    return { x: xVals, y: records.map(function(r) { return r[s.col]; }),
+             type: "bar", name: s.label };
+  });
+  Plotly.newPlot(cfg.divId, traces, {
+    title: cfg.title || cat,
+    xaxis: { title: cfg.xLabel, tickangle: -45 },
+    yaxis: { title: cfg.yLabel },
+    barmode: cfg.barmode,
+    height: cfg.height,
+    legend: { x: 0.01, y: 1.15, orientation: "h" }
+  });
+});
+
+// ── Renderer: dual_axis ────────────────────────────────────────────────────
+
+_registerRenderer("dual_axis", function(cfg, records, cat) {
+  var el = document.getElementById(cfg.divId);
+  var xVals  = records.map(function(r) { return r[cfg.xCol]; });
+  var yLeft  = records.map(function(r) { return r[cfg.leftCol]; });
+  var yRight = records.map(function(r) { return r[cfg.rightCol]; });
+  var traces = [
+    { x: xVals, y: yLeft,  mode: "lines+markers", name: cfg.leftLabel,  yaxis: "y"  },
+    { x: xVals, y: yRight, mode: "lines+markers", name: cfg.rightLabel, yaxis: "y2" }
+  ];
+  var layout = {
+    title:  cfg.title || (cfg.leftLabel + " vs " + cfg.rightLabel + " \u2014 " + cat),
+    xaxis:  { title: cfg.xLabel, tickangle: -45 },
+    yaxis:  { title: cfg.leftLabel,  side: "left" },
+    yaxis2: { title: cfg.rightLabel, side: "right", overlaying: "y" },
+    height: cfg.height,
+    legend: { x: 0.01, y: 1.15, orientation: "h" }
+  };
+  Plotly.newPlot(cfg.divId, traces, layout);
+
+  if (cfg.showOverlay && cfg.overlayDivId) {
+    Plotly.newPlot(cfg.overlayDivId, traces, Object.assign({}, layout, {
+      title: cat + " \u2014 " + cfg.leftLabel + " vs " + cfg.rightLabel
+    }));
+  }
+});
+
+// ── Renderer: scatter ──────────────────────────────────────────────────────
+
+_registerRenderer("scatter", function(cfg, records, cat, allData) {
+  var info = (allData && allData[cat] && allData[cat][cfg.yCol])
+             ? allData[cat][cfg.yCol]
+             : _buildScatterInfo(records, cfg);
+  _renderScatterPlot(cfg.divId, cfg, info, cat);
+  if (cfg.rangeFilter && info) _initRangeFilter(cfg, info, allData, cat);
+});
+
+function _buildScatterInfo(records, cfg) {
+  if (!records || !records.length) return null;
+  var xArr = [], yArr = [], times = [], ids = [];
+  records.forEach(function(r) {
+    if (r[cfg.xCol] != null && r[cfg.yCol] != null) {
+      xArr.push(r[cfg.xCol]); yArr.push(r[cfg.yCol]);
+      if (cfg.timeCol) times.push(r[cfg.timeCol]);
+      if (cfg.idCol)   ids.push(r[cfg.idCol]);
+    }
+  });
+  var stats = _pearson(xArr, yArr);
+  var slope = null, intercept = null;
+  if (stats.r !== null && xArr.length >= 2) {
+    var n = xArr.length, sx = 0, sy = 0, sxy = 0, sx2 = 0;
+    for (var i = 0; i < n; i++) {
+      sx += xArr[i]; sy += yArr[i]; sxy += xArr[i] * yArr[i]; sx2 += xArr[i] * xArr[i];
+    }
+    slope     = (n * sxy - sx * sy) / (n * sx2 - sx * sx);
+    intercept = (sy - slope * sx) / n;
+  }
+  return { x: xArr, y: yArr, timepoints: times, ids: ids,
+           r: stats.r, p: stats.p, n: stats.n,
+           slope: slope, intercept: intercept,
+           loess_x: null, loess_y: null };
+}
+
+function _renderScatterPlot(divId, cfg, info, label) {
+  var el = document.getElementById(divId);
+
+  var hover = info.timepoints.map(function(tp, i) {
+    var s = cfg.timeCol ? (cfg.timeCol + ": " + tp) : "";
+    if (cfg.idCol && info.ids[i]) s += (s ? "<br>" : "") + cfg.idCol + ": " + info.ids[i];
+    return s;
+  });
+
+  var traces = [{
+    x: info.x, y: info.y, mode: "markers", type: "scatter", name: "Data",
+    text: hover,
+    hovertemplate: "%{text}<br>" + cfg.xLabel + ": %{x:.3f}<br>" + cfg.yLabel + ": %{y:.3f}<extra></extra>",
+    marker: { size: 7, opacity: 0.7, color: "#4C78A8" }
+  }];
+
+  if (cfg.showRegression && info.slope !== null && info.x.length >= 2) {
+    var xMin = Math.min.apply(null, info.x), xMax = Math.max.apply(null, info.x);
+    var pad  = (xMax - xMin) * 0.05 || 0.1;
+    traces.push({
+      x: [xMin - pad, xMax + pad],
+      y: [info.slope * (xMin - pad) + info.intercept, info.slope * (xMax + pad) + info.intercept],
+      mode: "lines", name: "Linear",
+      line: { color: "#F58518", dash: "dash", width: 2 }
+    });
+  }
+  if (cfg.showLoess && info.loess_x && info.loess_x.length >= 2) {
+    traces.push({
+      x: info.loess_x, y: info.loess_y, mode: "lines", name: "LOESS",
+      line: { color: "#E45756", width: 2.5, shape: "spline" }
+    });
+  }
+
+  var titleText = cfg.title || (cfg.xLabel + " vs " + cfg.yLabel + " \u2014 " + label);
+  if (cfg.showStatsBadge && info.r !== null) {
+    var rTxt = "r = " + info.r.toFixed(4);
+    var pTxt = info.p !== null
+      ? "p = " + (info.p < 0.0001 ? info.p.toExponential(2) : info.p.toFixed(4))
+      : "";
+    titleText += "<br><span style='font-size:13px;color:#666;'>"
+               + rTxt + "    " + pTxt + "    n = " + info.n + "</span>";
+  }
+
+  Plotly.newPlot(divId, traces, {
+    title: { text: titleText },
+    xaxis: { title: cfg.xLabel },
+    yaxis: { title: cfg.yLabel },
+    showlegend: true,
+    legend: { orientation: "h", y: -0.2 },
+    margin: { t: 80, b: 60 },
+    hovermode: "closest",
+    height: cfg.height
+  }, { responsive: true });
+}
+
+function _initRangeFilter(cfg, info, allData, cat) {
+  var rf   = cfg.rangeFilter;
+  var loEl = document.getElementById(rf.loId);
+  var hiEl = document.getElementById(rf.hiId);
+  if (!loEl || !hiEl || !info.x.length) return;
+
+  var xMin = Math.min.apply(null, info.x), xMax = Math.max.apply(null, info.x);
+  var step = ((xMax - xMin) / 20).toFixed(4);
+  loEl.value = xMin.toFixed(2); loEl.step = step;
+  hiEl.value = xMax.toFixed(2); hiEl.step = step;
+
+  _updateRangeResult(cfg, allData, cat);
+}
+
+function _updateRangeResult(cfg, allData, cat) {
+  var rf    = cfg.rangeFilter; if (!rf) return;
+  var loEl  = document.getElementById(rf.loId);
+  var hiEl  = document.getElementById(rf.hiId);
+  var resEl = document.getElementById(rf.resultId);
+  if (!loEl || !hiEl || !resEl) return;
+
+  var lo       = parseFloat(loEl.value), hi = parseFloat(hiEl.value);
+  var useRange = isFinite(lo) && isFinite(hi);
+  var sd       = allData && allData[cat] ? allData[cat] : null;
+
+  function calcFiltered(info) {
+    if (!info) return { r: null, p: null, n: 0, avgX: null, avgY: null };
+    var xA = info.x, yA = info.y;
+    if (useRange) {
+      xA = []; yA = [];
+      for (var i = 0; i < info.x.length; i++) {
+        if (info.x[i] >= lo && info.x[i] <= hi) { xA.push(info.x[i]); yA.push(info.y[i]); }
+      }
+    }
+    var res = _pearson(xA, yA);
+    res.avgX = xA.length ? xA.reduce(function(a, b) { return a + b; }, 0) / xA.length : null;
+    res.avgY = yA.length ? yA.reduce(function(a, b) { return a + b; }, 0) / yA.length : null;
+    return res;
+  }
+
+  function fmtResult(res, label) {
+    var r  = res.r  !== null ? res.r.toFixed(4)  : "N/A";
+    var p  = res.p  !== null ? (res.p < 0.0001 ? res.p.toExponential(2) : res.p.toFixed(4)) : "N/A";
+    var ax = res.avgX !== null ? res.avgX.toFixed(2) : "N/A";
+    var ay = res.avgY !== null ? res.avgY.toFixed(2) : "N/A";
+    return "<strong>" + label + ":</strong>&nbsp;&nbsp;"
+      + "r = " + r + "&nbsp;&nbsp;&nbsp;"
+      + "p = " + p + "&nbsp;&nbsp;&nbsp;"
+      + "n = " + res.n + "&nbsp;&nbsp;&nbsp;"
+      + "Avg X = " + ax + "&nbsp;&nbsp;&nbsp;"
+      + "Avg Y = " + ay;
+  }
+
+  var lines = [];
+  if (sd && sd[cfg.yCol]) {
+    lines.push(fmtResult(calcFiltered(sd[cfg.yCol]), cfg.yLabel));
+  } else {
+    var records = sd || [];
+    var xA = [], yA = [];
+    records.forEach(function(r) {
+      var xv = r[cfg.xCol], yv = r[cfg.yCol];
+      if (xv != null && yv != null && (!useRange || (xv >= lo && xv <= hi))) {
+        xA.push(xv); yA.push(yv);
+      }
+    });
+    var res = _pearson(xA, yA);
+    res.avgX = xA.length ? xA.reduce(function(a, b) { return a + b; }, 0) / xA.length : null;
+    res.avgY = yA.length ? yA.reduce(function(a, b) { return a + b; }, 0) / yA.length : null;
+    lines.push(fmtResult(res, cfg.yLabel));
+  }
+  resEl.innerHTML = lines.join("<br>");
+}
+
+// ── Renderer: table ────────────────────────────────────────────────────────
+
+_registerRenderer("table", function(cfg, records) {
+  var el = document.getElementById(cfg.divId);
+  var hdr = "<th>" + cfg.timeLabel + "</th>";
+  cfg.columns.forEach(function(c) { hdr += "<th>" + c.label + "</th>"; });
+  var tbody = "";
+  records.forEach(function(r) {
+    var row = "<td>" + r[cfg.timeCol] + "</td>";
+    cfg.columns.forEach(function(c) { row += "<td>" + _fmtNum(r[c.col]) + "</td>"; });
+    tbody += "<tr>" + row + "</tr>";
+  });
+  el.innerHTML = "<table><thead><tr>" + hdr + "</tr></thead><tbody>" + tbody + "</tbody></table>";
+});
+
+// ── Renderer: comparison ───────────────────────────────────────────────────
+
+_registerRenderer("comparison", function(cfg) {
+  // Comparison drives itself from its own selectors; ignores view-level records.
+  var u1   = document.getElementById(cfg.divId + "-unit1");
+  var u2   = document.getElementById(cfg.divId + "-unit2");
+  var fkEl = document.getElementById(cfg.divId + "-filter");
+  if (!u1 || !u2 || !fkEl) return;
+
+  var g1 = u1.value, g2 = u2.value, fk = fkEl.value;
+  var chartEl = document.getElementById(cfg.divId + "-chart");
+  var tableEl = document.getElementById(cfg.divId + "-table");
+
+  if (!g1 || !g2 || g1 === g2) {
+    chartEl.innerHTML = (g1 && g2 && g1 === g2)
+      ? "<p style='color:#888;'>Please select two different " + cfg.groupLabel.toLowerCase() + "s.</p>"
+      : "";
+    tableEl.innerHTML = "";
+    return;
+  }
+
+  var bucket = cfg.data[fk] || {};
+  var d1 = bucket[g1] || [], d2 = bucket[g2] || [];
+
+  var bkSet = {};
+  d1.concat(d2).forEach(function(r) { bkSet[r.bucket] = 1; });
+  var bks  = Object.keys(bkSet).sort();
+  var map1 = {}, map2 = {};
+  d1.forEach(function(r) { map1[r.bucket] = r; });
+  d2.forEach(function(r) { map2[r.bucket] = r; });
+
+  Plotly.newPlot(cfg.divId + "-chart", [
+    { x: bks, y: bks.map(function(m) { return map1[m] ? map1[m].mean : null; }),
+      mode: "lines+markers", name: g1, connectgaps: false },
+    { x: bks, y: bks.map(function(m) { return map2[m] ? map2[m].mean : null; }),
+      mode: "lines+markers", name: g2, connectgaps: false }
+  ], {
+    title:  g1 + " vs " + g2 + "  " + cfg.valueLabel + " (" + cfg.filterLabel + ": " + fk + ")",
+    xaxis:  { title: cfg.bucketLabel, tickangle: -45 },
+    yaxis:  { title: cfg.valueLabel },
+    height: cfg.height
+  });
+
+  var hdr  = "<th>Metric</th>";
+  bks.forEach(function(m) { hdr += "<th>" + m + "</th>"; });
+
+  var rowLabels = [g1 + " Avg", g2 + " Avg", "Difference",
+                   g1 + " 95% CI", g2 + " 95% CI", "Difference 95% CI"];
+  var cells = rowLabels.map(function() { return ""; });
+  bks.forEach(function(m) {
+    var v1 = map1[m] ? map1[m].mean : null, v2 = map2[m] ? map2[m].mean : null;
+    cells[0] += "<td>" + _fmtNum(v1) + "</td>";
+    cells[1] += "<td>" + _fmtNum(v2) + "</td>";
+    cells[2] += "<td>" + _fmtNum(v1 != null && v2 != null ? v1 - v2 : null) + "</td>";
+    cells[3] += "<td>" + _fmtCI(map1[m]) + "</td>";
+    cells[4] += "<td>" + _fmtCI(map2[m]) + "</td>";
+    cells[5] += "<td>" + _fmtDiffCI(map1[m], map2[m]) + "</td>";
+  });
+
+  var tbody = "";
+  rowLabels.forEach(function(l, i) { tbody += "<tr><td>" + l + "</td>" + cells[i] + "</tr>"; });
+  tableEl.innerHTML = "<table><thead><tr>" + hdr + "</tr></thead><tbody>" + tbody + "</tbody></table>";
+});
+"""

@@ -56,9 +56,9 @@ class ChartBuilder:
                 )
             ]
         )
-        fig.update_layout(title=title, margin=dict(l=10, r=10, t=40, b=10), height=height)
-        return plotly_div(fig, include_plotlyjs=False, output_type="div")
-
+        fig.update_layout(autosize=True, title=title, margin=dict(l=10, r=10, t=40, b=10))
+        return fig.to_html(include_plotlyjs=False, full_html=False, config={"responsive": True})
+        
     @staticmethod
     def bar(
         df: pd.DataFrame,
@@ -103,13 +103,13 @@ class ChartBuilder:
             text=text or y,
             title=title,
         )
-        fig.update_layout(
+        fig.update_layout(autosize=True,
             xaxis_title=x_label or x,
             yaxis_title=y_label or y,
             legend_title=legend_title or color,
         )
         fig.update_traces(texttemplate=text_format, textposition="outside")
-        return fig.to_html(full_html=False, include_plotlyjs=False)
+        return fig.to_html(full_html=False, include_plotlyjs=False, config={"responsive": True})
 
     @staticmethod
     def grouped_bar(
@@ -156,13 +156,13 @@ class ChartBuilder:
             text=text or y,
             title=title,
         )
-        fig.update_layout(
+        fig.update_layout(autosize=True,
             xaxis_title=x_label or x,
             yaxis_title=y_label or y,
             legend_title=legend_title or color,
         )
         fig.update_traces(texttemplate=text_format, textposition="outside")
-        return fig.to_html(full_html=False, include_plotlyjs=False)
+        return fig.to_html(full_html=False, include_plotlyjs=False, config={"responsive": True})
 
     @staticmethod
     def histogram(
@@ -192,13 +192,13 @@ class ChartBuilder:
         """
         counts = values.value_counts().sort_index()
         fig = go.Figure(data=[go.Bar(x=counts.index, y=counts.values)])
-        fig.update_layout(
+        fig.update_layout(autosize=True,
             title=title,
             xaxis_title=x_label,
             yaxis_title=y_label,
             bargap=bargap,
         )
-        return fig.to_html(include_plotlyjs=False, full_html=False)
+        return fig.to_html(include_plotlyjs=False, full_html=False, config={"responsive": True})
 
     @staticmethod
     def single_line(
@@ -264,18 +264,18 @@ class ChartBuilder:
                          "yaxis": {"title": metric}},
                     ],
                 ))
-            fig.update_layout(updatemenus=[dict(
+            fig.update_layout(autosize=True,updatemenus=[dict(
                 buttons=buttons, direction="down",
                 showactive=True, x=1.02, y=1.15,
             )])
 
-        fig.update_layout(
-            title=title, height=height,
+        fig.update_layout(autosize=True,
+            title=title,
             xaxis_title=x_label or x,
             yaxis_title=y_label or y_default,
             legend_title=legend_title or color_col,
         )
-        return fig.to_html(include_plotlyjs=False, full_html=False)
+        return fig.to_html(include_plotlyjs=False, full_html=False, config={"responsive": True})
 
     @staticmethod
     def multi_line(
@@ -341,18 +341,18 @@ class ChartBuilder:
                          "yaxis": {"title": metric}},
                     ],
                 ))
-            fig.update_layout(updatemenus=[dict(
+            fig.update_layout(autosize=True,updatemenus=[dict(
                 buttons=buttons, direction="down",
                 showactive=True, x=1.02, y=1.15,
             )])
 
-        fig.update_layout(
-            title=title, height=height,
+        fig.update_layout(autosize=True,
+            title=title,
             xaxis_title=x_label or x,
             yaxis_title=y_label or y_default,
             legend_title=legend_title or color_col,
         )
-        return fig.to_html(include_plotlyjs=False, full_html=False)
+        return fig.to_html(include_plotlyjs=False, full_html=False, config={"responsive": True})
 
     @staticmethod
     def dual_axis_line(
@@ -399,15 +399,14 @@ class ChartBuilder:
             mode="lines+markers", name=y2_label or y2,
             yaxis="y2",
         ))
-        fig.update_layout(
+        fig.update_layout(autosize=True,
             title=title,
             xaxis=dict(title=x_label or x, tickangle=-45),
             yaxis=dict(title=y1_label or y1, side="left"),
             yaxis2=dict(title=y2_label or y2, side="right", overlaying="y"),
-            height=height,
             legend=dict(x=0.01, y=1.15, orientation="h"),
         )
-        return fig.to_html(include_plotlyjs=False, full_html=False)
+        return fig.to_html(include_plotlyjs=False, full_html=False, config={"responsive": True})
 
     @staticmethod
     def scatter(
@@ -448,13 +447,12 @@ class ChartBuilder:
         fig = px.scatter(
             df, x=x, y=y, color=color, size=size, title=title,
         )
-        fig.update_layout(
+        fig.update_layout(autosize=True,
             xaxis_title=x_label or x,
             yaxis_title=y_label or y,
             legend_title=legend_title or (color or ""),
-            height=height,
         )
-        return fig.to_html(include_plotlyjs=False, full_html=False)
+        return fig.to_html(include_plotlyjs=False, full_html=False, config={"responsive": True})
 
     @staticmethod
     def box(
@@ -486,9 +484,11 @@ class ChartBuilder:
             Self-contained HTML ``<div>`` fragment.
         """
         fig = px.box(df, x=x, y=y, color=color, title=title)
-        fig.update_layout(
+        fig.update_layout(autosize=True,
             xaxis_title=x_label or x,
             yaxis_title=y_label or y,
-            height=height,
         )
-        return fig.to_html(include_plotlyjs=False, full_html=False)
+        return fig.to_html(include_plotlyjs=False, full_html=False, config={"responsive": True})
+
+
+
