@@ -66,8 +66,8 @@ class ScatterInfo(TypedDict):
     loess_x: List[float]
     loess_y: List[float]
     n: int
-    depts: List[str]
-    yearmonths: List[str]
+    ids: List[str]
+    timepoints: List[str]
 
 # ---------------------------------------------------------------------------
 # StatsHelper

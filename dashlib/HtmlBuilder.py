@@ -1,9 +1,3 @@
-"""html_builder.py — Dashboard HTML generation library.
-
-Builds interactive HTML dashboards with Plotly charts, tabbed sections,
-and view panels driven by structured Python config objects.
-"""
-
 from __future__ import annotations
 
 import json
@@ -39,6 +33,12 @@ class Section:
     def add_tab(self, key: str, label: str, content_html: str) -> "Section":
         self.tabs.append(Tab(key, label, content_html))
         return self
+
+@dataclass
+class GraphRow:
+    graphs: list[GraphConfig]
+    layout: str = "stack"      # "stack" | "halves" | "thirds" | "sidebar-left" | "sidebar-right"
+    gap: int = 16              # px gap between columns
 
 
 # ---------------------------------------------------------------------------
@@ -125,12 +125,13 @@ class ScatterOptions(GraphOptions):
     x_label: str = ""
     y_col: str = ""
     y_label: str = ""
-    id_col: str = ""    # hover-label column (e.g. department name)
-    time_col: str = ""  # hover-label column (e.g. YearMonth)
+    id_col: str = ""
+    time_col: str = ""
     title: str = ""
     show_regression: bool = True
     show_loess: bool = True
-    show_stats_badge: bool = True  # r, p, n annotation in chart title
+    show_stats_badge: bool = True
+    weight_col: str = ""          
     range_filter: RangeFilterOptions | None = None
 
 
@@ -173,32 +174,19 @@ class GraphConfig:
 
 @dataclass
 class ViewConfig:
-    key: str          # unique identifier, also DOM id prefix
-    tab_label: str    # text on the top-tab button
-    heading: str      # <h2> inside the panel
+    key: str
+    tab_label: str
+    heading: str
     description: str = ""
     data_json: str = "null"
     controls: list[ControlConfig] = field(default_factory=list)
-    graphs: list[GraphConfig] = field(default_factory=list)
-
+    rows: list[GraphRow] = field(default_factory=list)
 
 # ---------------------------------------------------------------------------
 # HTMLBuilder
 # ---------------------------------------------------------------------------
 
 class HTMLBuilder:
-    """
-    Assembles a multi-section, multi-view HTML dashboard.
-
-    Usage::
-
-        builder = HTMLBuilder(title="My Dashboard", ...)
-        sec = builder.add_section("q1", "Q1 Results", ("2024-01-01", "2024-03-31"))
-        sec.add_tab("overview", "Overview", "<p>Content here</p>")
-        builder.add_view(ViewConfig(...))
-        builder.save("dashboard.html")
-    """
-
     def __init__(
         self,
         title: str,
@@ -358,12 +346,38 @@ class HTMLBuilder:
 
     def _render_view(self, v: ViewConfig) -> str:
         controls_html = "\n".join(self._render_control(c, v.key) for c in v.controls)
-        graphs_html = "\n".join(self._render_graph(g, v.key) for g in v.graphs)
         desc_html = (
             f'<p style="margin:0 0 12px;color:#555;">{v.description}</p>'
-            if v.description
-            else ""
+            if v.description else ""
         )
+
+        LAYOUT_WIDTHS = {
+            "stack":         ["100%"],
+            "halves":        ["50%", "50%"],
+            "thirds":        ["33.33%", "33.33%", "33.33%"],
+            "sidebar-left":  ["30%", "70%"],
+            "sidebar-right": ["70%", "30%"],
+        }
+
+        rows_html = []
+        for row in v.rows:
+            widths = LAYOUT_WIDTHS.get(row.layout, ["100%"])
+            if row.layout == "stack" or len(row.graphs) == 1:
+                rows_html.append(self._render_graph(row.graphs[0], v.key))
+            else:
+                cols = []
+                for i, g in enumerate(row.graphs):
+                    w = widths[i] if i < len(widths) else "auto"
+                    inner = self._render_graph(g, v.key)
+                    cols.append(
+                        f'<div style="flex:0 0 {w};min-width:0;">{inner}</div>'
+                    )
+                rows_html.append(
+                    f'<div style="display:flex;gap:{row.gap}px;margin-top:20px;">'
+                    + "".join(cols)
+                    + '</div>'
+                )
+
         return (
             f'<div id="view-{v.key}" style="display:none;">\n'
             f'  <h2 style="margin:18px 0 8px;">{v.heading}</h2>\n'
@@ -371,8 +385,8 @@ class HTMLBuilder:
             f'  <div class="view-controls" style="margin-bottom:15px;">\n'
             f"    {controls_html}\n"
             f"  </div>\n"
-            f"  {graphs_html}\n"
-            f"</div>\n"
+            + "\n".join(rows_html)
+            + "\n</div>\n"
         )
 
     def _render_control(self, c: ControlConfig, view_key: str) -> str:
@@ -550,20 +564,70 @@ function _betaInc(a, b, x) {
   return 1 - bt * _betaCF(b, a, 1 - x) / b;
 }
 
-function _pearson(xArr, yArr) {
+function _pearson(xArr, yArr, wArr) {
   var n = xArr.length;
   if (n < 3) return { r: null, p: null, n: n };
-  var sx = 0, sy = 0, sxy = 0, sx2 = 0, sy2 = 0;
+
+  // Fall back to uniform weights if none supplied
+  var w = wArr && wArr.length === n ? wArr : null;
+
+  var sw = 0, swx = 0, swy = 0, swx2 = 0, swy2 = 0, swxy = 0;
   for (var i = 0; i < n; i++) {
-    sx += xArr[i]; sy += yArr[i];
-    sxy += xArr[i] * yArr[i]; sx2 += xArr[i] * xArr[i]; sy2 += yArr[i] * yArr[i];
+    var wi = w ? w[i] : 1;
+    sw   += wi;
+    swx  += wi * xArr[i];
+    swy  += wi * yArr[i];
+    swx2 += wi * xArr[i] * xArr[i];
+    swy2 += wi * yArr[i] * yArr[i];
+    swxy += wi * xArr[i] * yArr[i];
   }
-  var num = n * sxy - sx * sy;
-  var den = Math.sqrt((n * sx2 - sx * sx) * (n * sy2 - sy * sy));
+  var num = sw * swxy - swx * swy;
+  var den = Math.sqrt((sw * swx2 - swx * swx) * (sw * swy2 - swy * swy));
   if (den === 0) return { r: null, p: null, n: n };
   var r = num / den, df = n - 2, t2 = r * r * df / (1 - r * r);
   var p = _betaInc(df / 2, 0.5, df / (df + t2));
   return { r: r, p: p, n: n };
+}
+
+function _loess(xArr, yArr, wArr, bandwidth) {
+  var n = xArr.length;
+  if (n < 4) return null;
+  bandwidth = bandwidth || 0.75;
+  var q = Math.max(2, Math.floor(bandwidth * n));
+  var hasWeights = wArr && wArr.length === n;
+
+  var idx = xArr.map(function(_, i) { return i; })
+    .sort(function(a, b) { return xArr[a] - xArr[b]; });
+  var xs = idx.map(function(i) { return xArr[i]; });
+  var ys = idx.map(function(i) { return yArr[i]; });
+  var ws = hasWeights ? idx.map(function(i) { return wArr[i]; }) : null;
+
+  var fitted = new Array(n);
+  for (var i = 0; i < n; i++) {
+    var dists = xs.map(function(x) { return Math.abs(x - xs[i]); });
+    var sorted_d = dists.slice().sort(function(a, b) { return a - b; });
+    var h = sorted_d[q - 1] || 1e-10;
+
+    var sw = 0, swx = 0, swy = 0, swx2 = 0, swxy = 0;
+    for (var j = 0; j < n; j++) {
+      var u = dists[j] / h;
+      if (u >= 1) continue;
+      var tricube = Math.pow(1 - u * u * u, 3);
+      // multiply tricube by observation weight if available
+      var w = hasWeights ? tricube * ws[j] : tricube;
+      sw   += w;  swx  += w * xs[j]; swy  += w * ys[j];
+      swx2 += w * xs[j] * xs[j];     swxy += w * xs[j] * ys[j];
+    }
+    var denom = sw * swx2 - swx * swx;
+    if (Math.abs(denom) < 1e-12) {
+      fitted[i] = sw > 0 ? swy / sw : ys[i];
+    } else {
+      var slope_l = (sw * swxy - swx * swy) / denom;
+      var int_l   = (swy - slope_l * swx) / sw;
+      fitted[i]   = slope_l * xs[i] + int_l;
+    }
+  }
+  return { x: xs, y: fitted };
 }
 
 // Populated externally if needed (e.g. via HTMLBuilder.t_crit_table).
@@ -608,25 +672,12 @@ function _registerView(key, data, configs) {
 """
 
     def _js_for_view(self, v: ViewConfig) -> str:
-        configs_js = json.dumps([self._graph_config_to_js_obj(g) for g in v.graphs])
+        all_graphs = [g for row in v.rows for g in row.graphs]  # flatten
+        configs_js = json.dumps([self._graph_config_to_js_obj(g) for g in all_graphs])
         lines = [
             f"// ── View: {v.key} ────────────────────────────────────────────────",
             f"_registerView({json.dumps(v.key)}, {v.data_json}, {configs_js});",
         ]
-        # Wire up range-filter inputs for any scatter that has one
-        for g in v.graphs:
-            if isinstance(g.options, ScatterOptions) and g.options.range_filter:
-                rf = g.options.range_filter
-                lines.append(
-                    f"document.addEventListener('DOMContentLoaded', function() {{"
-                    f"  ['{ rf.lo_input_id }', '{ rf.hi_input_id }'].forEach(function(id) {{"
-                    f"    var el = document.getElementById(id);"
-                    f"    if (el) el.addEventListener('input', function() {{"
-                    f"      updateView({json.dumps(v.key)});"
-                    f"    }});"
-                    f"  }});"
-                    f"}});"
-                )
         return "\n".join(lines)
 
     def _graph_config_to_js_obj(self, g: GraphConfig) -> dict[str, Any]:
@@ -659,6 +710,7 @@ function _registerView(key, data, configs) {
             rf_obj = None
             if o.range_filter:
                 rf_obj = {
+                    "weightCol": o.weight_col,
                     "loId": o.range_filter.lo_input_id,
                     "hiId": o.range_filter.hi_input_id,
                     "resultId": o.range_filter.result_div_id,
@@ -811,28 +863,40 @@ _registerRenderer("scatter", function(cfg, records, cat, allData) {
 
 function _buildScatterInfo(records, cfg) {
   if (!records || !records.length) return null;
-  var xArr = [], yArr = [], times = [], ids = [];
+  var xArr = [], yArr = [], wArr = [], times = [], ids = [];
+  var hasWeights = !!cfg.weightCol;
   records.forEach(function(r) {
     if (r[cfg.xCol] != null && r[cfg.yCol] != null) {
-      xArr.push(r[cfg.xCol]); yArr.push(r[cfg.yCol]);
+      xArr.push(r[cfg.xCol]);
+      yArr.push(r[cfg.yCol]);
+      if (hasWeights && r[cfg.weightCol] != null) wArr.push(r[cfg.weightCol]);
       if (cfg.timeCol) times.push(r[cfg.timeCol]);
       if (cfg.idCol)   ids.push(r[cfg.idCol]);
     }
   });
-  var stats = _pearson(xArr, yArr);
+  var weights = (hasWeights && wArr.length === xArr.length) ? wArr : null;
+  var stats = _pearson(xArr, yArr, weights);
   var slope = null, intercept = null;
   if (stats.r !== null && xArr.length >= 2) {
-    var n = xArr.length, sx = 0, sy = 0, sxy = 0, sx2 = 0;
-    for (var i = 0; i < n; i++) {
-      sx += xArr[i]; sy += yArr[i]; sxy += xArr[i] * yArr[i]; sx2 += xArr[i] * xArr[i];
+    // Weighted OLS
+    var sw = 0, swx = 0, swy = 0, swx2 = 0, swxy = 0;
+    for (var i = 0; i < xArr.length; i++) {
+      var wi = weights ? weights[i] : 1;
+      sw += wi; swx += wi * xArr[i]; swy += wi * yArr[i];
+      swx2 += wi * xArr[i] * xArr[i]; swxy += wi * xArr[i] * yArr[i];
     }
-    slope     = (n * sxy - sx * sy) / (n * sx2 - sx * sx);
-    intercept = (sy - slope * sx) / n;
+    var denom = sw * swx2 - swx * swx;
+    if (Math.abs(denom) > 1e-12) {
+      slope     = (sw * swxy - swx * swy) / denom;
+      intercept = (swy - slope * swx) / sw;
+    }
   }
+  var loessResult = _loess(xArr, yArr, weights, 0.75);
   return { x: xArr, y: yArr, timepoints: times, ids: ids,
            r: stats.r, p: stats.p, n: stats.n,
            slope: slope, intercept: intercept,
-           loess_x: null, loess_y: null };
+           loess_x: loessResult ? loessResult.x : null,
+           loess_y: loessResult ? loessResult.y : null };
 }
 
 function _renderScatterPlot(divId, cfg, info, label) {
@@ -901,6 +965,13 @@ function _initRangeFilter(cfg, info, allData, cat) {
   loEl.value = xMin.toFixed(2); loEl.step = step;
   hiEl.value = xMax.toFixed(2); hiEl.step = step;
 
+  // Attach listeners here instead of DOMContentLoaded — inputs are
+  // guaranteed to exist at this point, and this re-runs on each view
+  // switch so listeners are always fresh.
+  [loEl, hiEl].forEach(function(el) {
+    el.oninput = function() { _updateRangeResult(cfg, allData, cat); };
+  });
+
   _updateRangeResult(cfg, allData, cat);
 }
 
@@ -946,18 +1017,31 @@ function _updateRangeResult(cfg, allData, cat) {
   var lines = [];
   if (sd && sd[cfg.yCol]) {
     lines.push(fmtResult(calcFiltered(sd[cfg.yCol]), cfg.yLabel));
-  } else {
+    } else {
     var records = sd || [];
-    var xA = [], yA = [];
+    var xA = [], yA = [], wA = [];
+    var hasW = !!cfg.weightCol;
     records.forEach(function(r) {
       var xv = r[cfg.xCol], yv = r[cfg.yCol];
       if (xv != null && yv != null && (!useRange || (xv >= lo && xv <= hi))) {
         xA.push(xv); yA.push(yv);
+        if (hasW && r[cfg.weightCol] != null) wA.push(r[cfg.weightCol]);
       }
     });
-    var res = _pearson(xA, yA);
-    res.avgX = xA.length ? xA.reduce(function(a, b) { return a + b; }, 0) / xA.length : null;
-    res.avgY = yA.length ? yA.reduce(function(a, b) { return a + b; }, 0) / yA.length : null;
+    var weights = (hasW && wA.length === xA.length) ? wA : null;
+    var res = _pearson(xA, yA, weights);
+    // Weighted averages for display
+    if (weights) {
+      var sw = 0, swx = 0, swy = 0;
+      for (var i = 0; i < xA.length; i++) {
+        sw += weights[i]; swx += weights[i] * xA[i]; swy += weights[i] * yA[i];
+      }
+      res.avgX = sw > 0 ? swx / sw : null;
+      res.avgY = sw > 0 ? swy / sw : null;
+    } else {
+      res.avgX = xA.length ? xA.reduce(function(a, b) { return a + b; }, 0) / xA.length : null;
+      res.avgY = yA.length ? yA.reduce(function(a, b) { return a + b; }, 0) / yA.length : null;
+    }
     lines.push(fmtResult(res, cfg.yLabel));
   }
   resEl.innerHTML = lines.join("<br>");
