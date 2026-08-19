@@ -83,7 +83,7 @@ class LineOptions(GraphOptions):
     y_label: str = ""
     title: str = ""
     connect_gaps: bool = False
-
+    average_x: bool = False
 
 @dataclass
 class BarOptions(GraphOptions):
@@ -686,10 +686,11 @@ function _registerView(key, data, configs) {
         base: dict[str, Any] = {"divId": g.div_id, "height": g.height}
 
         if isinstance(o, LineOptions):
-            return {**base, "type": "line", "series": o.series,
-                    "xCol": o.x_col, "xLabel": o.x_label,
-                    "yLabel": o.y_label, "title": o.title,
-                    "connectGaps": o.connect_gaps}
+          return {**base, "type": "line", "series": o.series,
+                  "xCol": o.x_col, "xLabel": o.x_label,
+                  "yLabel": o.y_label, "title": o.title,
+                  "connectGaps": o.connect_gaps,
+                  "averageX": o.average_x}
 
         if isinstance(o, BarOptions):
             return {**base, "type": "bar", "series": o.series,
@@ -710,7 +711,6 @@ function _registerView(key, data, configs) {
             rf_obj = None
             if o.range_filter:
                 rf_obj = {
-                    "weightCol": o.weight_col,
                     "loId": o.range_filter.lo_input_id,
                     "hiId": o.range_filter.hi_input_id,
                     "resultId": o.range_filter.result_div_id,
@@ -723,6 +723,7 @@ function _registerView(key, data, configs) {
                     "showRegression": o.show_regression,
                     "showLoess": o.show_loess,
                     "showStatsBadge": o.show_stats_badge,
+                    "weightCol": o.weight_col,
                     "rangeFilter": rf_obj}
 
         if isinstance(o, TableOptions):
@@ -789,10 +790,38 @@ function switchView(viewKey) {
 // ── Renderer: line ─────────────────────────────────────────────────────────
 
 _registerRenderer("line", function(cfg, records, cat) {
-  var el = document.getElementById(cfg.divId);
-  var xVals = records.map(function(r) { return r[cfg.xCol]; });
+  var rows = records;
+
+  if (cfg.averageX) {
+    // Group by x value, average each series col independently
+    var buckets = {};
+    var order   = [];
+    rows.forEach(function(r) {
+      var xv = r[cfg.xCol];
+      if (xv == null) return;
+      var key = String(xv);
+      if (!buckets[key]) { buckets[key] = { xVal: xv, cols: {}, counts: {} }; order.push(key); }
+      cfg.series.forEach(function(s) {
+        if (r[s.col] != null) {
+          buckets[key].cols[s.col]   = (buckets[key].cols[s.col]   || 0) + r[s.col];
+          buckets[key].counts[s.col] = (buckets[key].counts[s.col] || 0) + 1;
+        }
+      });
+    });
+    rows = order.map(function(key) {
+      var b   = buckets[key];
+      var out = {};
+      out[cfg.xCol] = b.xVal;
+      cfg.series.forEach(function(s) {
+        out[s.col] = b.counts[s.col] ? b.cols[s.col] / b.counts[s.col] : null;
+      });
+      return out;
+    });
+  }
+
+  var xVals = rows.map(function(r) { return r[cfg.xCol]; });
   var traces = cfg.series.map(function(s) {
-    return { x: xVals, y: records.map(function(r) { return r[s.col]; }),
+    return { x: xVals, y: rows.map(function(r) { return r[s.col]; }),
              mode: "lines+markers", name: s.label, connectgaps: cfg.connectGaps };
   });
   Plotly.newPlot(cfg.divId, traces, {
@@ -854,11 +883,9 @@ _registerRenderer("dual_axis", function(cfg, records, cat) {
 // ── Renderer: scatter ──────────────────────────────────────────────────────
 
 _registerRenderer("scatter", function(cfg, records, cat, allData) {
-  var info = (allData && allData[cat] && allData[cat][cfg.yCol])
-             ? allData[cat][cfg.yCol]
-             : _buildScatterInfo(records, cfg);
+  var info = _buildScatterInfo(records, cfg);
   _renderScatterPlot(cfg.divId, cfg, info, cat);
-  if (cfg.rangeFilter && info) _initRangeFilter(cfg, info, allData, cat);
+  if (cfg.rangeFilter && info) _initRangeFilter(cfg, info, records, cat);
 });
 
 function _buildScatterInfo(records, cfg) {
@@ -954,7 +981,7 @@ function _renderScatterPlot(divId, cfg, info, label) {
   }, { responsive: true });
 }
 
-function _initRangeFilter(cfg, info, allData, cat) {
+function _initRangeFilter(cfg, info, records, cat) {
   var rf   = cfg.rangeFilter;
   var loEl = document.getElementById(rf.loId);
   var hiEl = document.getElementById(rf.hiId);
@@ -962,20 +989,17 @@ function _initRangeFilter(cfg, info, allData, cat) {
 
   var xMin = Math.min.apply(null, info.x), xMax = Math.max.apply(null, info.x);
   var step = ((xMax - xMin) / 20).toFixed(4);
-  loEl.value = xMin.toFixed(2); loEl.step = step;
-  hiEl.value = xMax.toFixed(2); hiEl.step = step;
+  loEl.value = Math.floor(xMin * 100) / 100; loEl.step = step;
+  hiEl.value = Math.ceil(xMax * 100) / 100; hiEl.step = step;
 
-  // Attach listeners here instead of DOMContentLoaded — inputs are
-  // guaranteed to exist at this point, and this re-runs on each view
-  // switch so listeners are always fresh.
   [loEl, hiEl].forEach(function(el) {
-    el.oninput = function() { _updateRangeResult(cfg, allData, cat); };
+    el.oninput = function() { _updateRangeResult(cfg, records); };
   });
 
-  _updateRangeResult(cfg, allData, cat);
+  _updateRangeResult(cfg, records);
 }
 
-function _updateRangeResult(cfg, allData, cat) {
+function _updateRangeResult(cfg, records) {
   var rf    = cfg.rangeFilter; if (!rf) return;
   var loEl  = document.getElementById(rf.loId);
   var hiEl  = document.getElementById(rf.hiId);
@@ -984,22 +1008,7 @@ function _updateRangeResult(cfg, allData, cat) {
 
   var lo       = parseFloat(loEl.value), hi = parseFloat(hiEl.value);
   var useRange = isFinite(lo) && isFinite(hi);
-  var sd       = allData && allData[cat] ? allData[cat] : null;
-
-  function calcFiltered(info) {
-    if (!info) return { r: null, p: null, n: 0, avgX: null, avgY: null };
-    var xA = info.x, yA = info.y;
-    if (useRange) {
-      xA = []; yA = [];
-      for (var i = 0; i < info.x.length; i++) {
-        if (info.x[i] >= lo && info.x[i] <= hi) { xA.push(info.x[i]); yA.push(info.y[i]); }
-      }
-    }
-    var res = _pearson(xA, yA);
-    res.avgX = xA.length ? xA.reduce(function(a, b) { return a + b; }, 0) / xA.length : null;
-    res.avgY = yA.length ? yA.reduce(function(a, b) { return a + b; }, 0) / yA.length : null;
-    return res;
-  }
+  var hasW     = !!cfg.weightCol;
 
   function fmtResult(res, label) {
     var r  = res.r  !== null ? res.r.toFixed(4)  : "N/A";
@@ -1014,37 +1023,28 @@ function _updateRangeResult(cfg, allData, cat) {
       + "Avg Y = " + ay;
   }
 
-  var lines = [];
-  if (sd && sd[cfg.yCol]) {
-    lines.push(fmtResult(calcFiltered(sd[cfg.yCol]), cfg.yLabel));
-    } else {
-    var records = sd || [];
-    var xA = [], yA = [], wA = [];
-    var hasW = !!cfg.weightCol;
-    records.forEach(function(r) {
-      var xv = r[cfg.xCol], yv = r[cfg.yCol];
-      if (xv != null && yv != null && (!useRange || (xv >= lo && xv <= hi))) {
-        xA.push(xv); yA.push(yv);
-        if (hasW && r[cfg.weightCol] != null) wA.push(r[cfg.weightCol]);
-      }
-    });
-    var weights = (hasW && wA.length === xA.length) ? wA : null;
-    var res = _pearson(xA, yA, weights);
-    // Weighted averages for display
-    if (weights) {
-      var sw = 0, swx = 0, swy = 0;
-      for (var i = 0; i < xA.length; i++) {
-        sw += weights[i]; swx += weights[i] * xA[i]; swy += weights[i] * yA[i];
-      }
-      res.avgX = sw > 0 ? swx / sw : null;
-      res.avgY = sw > 0 ? swy / sw : null;
-    } else {
-      res.avgX = xA.length ? xA.reduce(function(a, b) { return a + b; }, 0) / xA.length : null;
-      res.avgY = yA.length ? yA.reduce(function(a, b) { return a + b; }, 0) / yA.length : null;
+  var xA = [], yA = [], wA = [];
+  (records || []).forEach(function(r) {
+    var xv = r[cfg.xCol], yv = r[cfg.yCol];
+    if (xv != null && yv != null && (!useRange || (xv >= lo && xv <= hi))) {
+      xA.push(xv); yA.push(yv);
+      if (hasW && r[cfg.weightCol] != null) wA.push(r[cfg.weightCol]);
     }
-    lines.push(fmtResult(res, cfg.yLabel));
+  });
+  var weights = (hasW && wA.length === xA.length) ? wA : null;
+  var res = _pearson(xA, yA, weights);
+  if (weights) {
+    var sw = 0, swx = 0, swy = 0;
+    for (var i = 0; i < xA.length; i++) {
+      sw += weights[i]; swx += weights[i] * xA[i]; swy += weights[i] * yA[i];
+    }
+    res.avgX = sw > 0 ? swx / sw : null;
+    res.avgY = sw > 0 ? swy / sw : null;
+  } else {
+    res.avgX = xA.length ? xA.reduce(function(a, b) { return a + b; }, 0) / xA.length : null;
+    res.avgY = yA.length ? yA.reduce(function(a, b) { return a + b; }, 0) / yA.length : null;
   }
-  resEl.innerHTML = lines.join("<br>");
+  resEl.innerHTML = fmtResult(res, cfg.yLabel);
 }
 
 // ── Renderer: table ────────────────────────────────────────────────────────
