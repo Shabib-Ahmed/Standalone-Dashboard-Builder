@@ -40,6 +40,19 @@ STANDARD_AGGS: Dict[str, AggFn] = {
 ComparisonData = Dict[Any, Dict[str, List[Dict[str, Any]]]]
 
 
+def _build_yearmonth(df: pd.DataFrame, date_col: str) -> pd.Series:
+    """Derive a YYYY-MM period key from a parsed datetime column."""
+    dt = pd.to_datetime(df[date_col])
+    return dt.dt.year.astype(str) + "-" + dt.dt.month.astype(str).str.zfill(2)
+
+
+def _build_yearmonth_from_parts(
+    df: pd.DataFrame, year_col: str, month_col: str
+) -> pd.Series:
+    """Derive a YYYY-MM period key from separate year/month integer columns."""
+    return df[year_col].astype(str) + "-" + df[month_col].astype(str).str.zfill(2)
+
+
 class StatsHelper:
 
     # ------------------------------------------------------------------
@@ -271,103 +284,134 @@ class StatsHelper:
 
     @staticmethod
     def build_correlation_data(
-        df_workload: pd.DataFrame,
+        df_primary: pd.DataFrame,
         df_secondary: pd.DataFrame,
-        hour: int,
-        sec_col1: str,
-        sec_col2: str,
-        workload_date_col: str = "Date",
-        workload_dept_col: str = "Department_Name",
-        workload_value_col: str = "Value_Per_Employee",
-        secondary_year_col: str = "Year",
-        secondary_month_col: str = "Month",
-        secondary_dept_col: str = "Department_Name",
+        # --- primary (x-axis / "workload") configuration ---
+        primary_value_col: str,
+        primary_entity_col: str,
+        primary_date_col: str,
+        primary_agg_col: str = "Primary_Avg",
+        # --- optional scalar filter on primary (e.g. hour-of-day) ---
+        primary_filter_col: Optional[str] = None,
+        primary_filter_value: Optional[Any] = None,
+        # --- secondary (y-axis) configuration ---
+        secondary_y_cols: List[str] = (),           # type: ignore[assignment]
+        secondary_entity_col: Optional[str] = None, # defaults to primary_entity_col
+        # secondary date: either a single datetime column …
+        secondary_date_col: Optional[str] = None,
+        # … or two integer part-columns (year + month)
+        secondary_year_col: Optional[str] = None,
+        secondary_month_col: Optional[str] = None,
+        # --- grouping ---
         named_groups: Optional[Dict[str, List[str]]] = None,
         loess_frac: float = 0.6,
     ) -> Dict[str, Any]:
-        # --- workload: filter hour, build YearMonth ---
-        wl = df_workload[df_workload["Hour"] == hour].copy()
-        wl[workload_date_col] = pd.to_datetime(wl[workload_date_col])
-        wl["YearMonth"] = (
-            wl[workload_date_col].dt.year.astype(str)
-            + "-"
-            + wl[workload_date_col].dt.month.astype(str).str.zfill(2)
-        )
-        wl_agg = (
-            wl.groupby([workload_dept_col, "YearMonth"])[workload_value_col]
-            .mean()
-            .reset_index()
-            .rename(columns={workload_value_col: "Workload_Avg"})
-            .round(4)
-        )
+        secondary_y_cols = list(secondary_y_cols)
+        if not secondary_y_cols:
+            raise ValueError("secondary_y_cols must contain at least one column name.")
 
-        # --- secondary: build YearMonth ---
-        sec = df_secondary.copy()
-        sec["YearMonth"] = (
-            sec[secondary_year_col].astype(str)
-            + "-"
-            + sec[secondary_month_col].astype(str).str.zfill(2)
-        )
-        sec_agg = (
-            sec.groupby([secondary_dept_col, "YearMonth"])
-            .agg(col1_avg=(sec_col1, "mean"), col2_avg=(sec_col2, "mean"))
-            .reset_index()
-            .round(4)
-        )
-        # normalise to a shared dept key
-        sec_agg = sec_agg.rename(columns={secondary_dept_col: workload_dept_col})
+        sec_entity_col = secondary_entity_col or primary_entity_col
 
-        merged = wl_agg.merge(sec_agg, on=[workload_dept_col, "YearMonth"], how="inner")
-        # rename aggregated columns to the original metric names for scatter_stats
-        merged = merged.rename(columns={"col1_avg": sec_col1, "col2_avg": sec_col2})
-
-        departments = sorted(merged[workload_dept_col].unique().tolist())
-
-        scatter: Dict[str, Any] = {}
-
-        # per-department entries
-        for dept in departments:
-            sub = merged[merged[workload_dept_col] == dept]
-            scatter[dept] = StatsHelper.scatter_stats(
-                sub,
-                x_col=     "Workload_Avg",
-                y_cols=    [sec_col1, sec_col2],
-                label=     dept,
-                time_col=  "YearMonth",
-                loess_frac=loess_frac,
+        # Validate secondary date specification
+        has_single_date = secondary_date_col is not None
+        has_part_dates  = secondary_year_col is not None and secondary_month_col is not None
+        if not has_single_date and not has_part_dates:
+            raise ValueError(
+                "Provide either secondary_date_col or both secondary_year_col "
+                "and secondary_month_col."
             )
 
-        # overall (all departments pooled)
+        # ------------------------------------------------------------------
+        # 1. Prepare primary
+        # ------------------------------------------------------------------
+        prim = df_primary.copy()
+        if primary_filter_col is not None and primary_filter_value is not None:
+            prim = prim[prim[primary_filter_col] == primary_filter_value]
+
+        prim["_period"] = _build_yearmonth(prim, primary_date_col)
+
+        prim_agg = (
+            prim.groupby([primary_entity_col, "_period"])[primary_value_col]
+            .mean()
+            .reset_index()
+            .rename(columns={
+                primary_value_col: primary_agg_col,
+                primary_entity_col: "_entity",
+            })
+            .round(4)
+        )
+
+        # ------------------------------------------------------------------
+        # 2. Prepare secondary
+        # ------------------------------------------------------------------
+        sec = df_secondary.copy()
+        if has_single_date:
+            sec["_period"] = _build_yearmonth(sec, secondary_date_col)
+        else:
+            sec["_period"] = _build_yearmonth_from_parts(
+                sec, secondary_year_col, secondary_month_col  # type: ignore[arg-type]
+            )
+
+        sec_agg = (
+            sec.groupby([sec_entity_col, "_period"])[secondary_y_cols]
+            .mean()
+            .reset_index()
+            .rename(columns={sec_entity_col: "_entity"})
+            .round(4)
+        )
+
+        # ------------------------------------------------------------------
+        # 3. Merge
+        # ------------------------------------------------------------------
+        merged = prim_agg.merge(sec_agg, on=["_entity", "_period"], how="inner")
+
+        entities: List[str] = sorted(merged["_entity"].unique().tolist())
+
+        # ------------------------------------------------------------------
+        # 4. Build scatter data
+        # ------------------------------------------------------------------
+        scatter: Dict[str, Any] = {}
+
+        for entity in entities:
+            sub = merged[merged["_entity"] == entity]
+            scatter[entity] = StatsHelper.scatter_stats(
+                sub,
+                x_col=      primary_agg_col,
+                y_cols=     secondary_y_cols,
+                label=      entity,
+                time_col=   "_period",
+                loess_frac= loess_frac,
+            )
+
         scatter["Overall"] = StatsHelper.scatter_stats(
             merged,
-            x_col=     "Workload_Avg",
-            y_cols=    [sec_col1, sec_col2],
+            x_col=     primary_agg_col,
+            y_cols=    secondary_y_cols,
             label=     "Overall",
-            id_col=    workload_dept_col,
-            time_col=  "YearMonth",
+            id_col=    "_entity",
+            time_col=  "_period",
             loess_frac=loess_frac,
         )
 
-        # named groups (e.g. MED SURGE, ICU)
         group_labels: List[str] = []
         if named_groups:
-            for group_name, group_depts in named_groups.items():
-                sub = merged[merged[workload_dept_col].isin(group_depts)]
+            for group_name, group_entities in named_groups.items():
+                sub = merged[merged["_entity"].isin(group_entities)]
                 scatter[group_name] = StatsHelper.scatter_stats(
                     sub,
-                    x_col=     "Workload_Avg",
-                    y_cols=    [sec_col1, sec_col2],
+                    x_col=     primary_agg_col,
+                    y_cols=    secondary_y_cols,
                     label=     group_name,
-                    id_col=    workload_dept_col,
-                    time_col=  "YearMonth",
+                    id_col=    "_entity",
+                    time_col=  "_period",
                     loess_frac=loess_frac,
                 )
                 group_labels.append(group_name)
 
         return {
-            "__scatter__":           scatter,
-            "__departments__":       departments,
-            "__department_groups__": group_labels,
-            "__col1__":              sec_col1,
-            "__col2__":              sec_col2,
+            "__scatter__":        scatter,
+            "__entities__":       entities,
+            "__entity_groups__":  group_labels,
+            "__y_cols__":         secondary_y_cols,
+            "__primary_agg_col__": primary_agg_col,
         }
