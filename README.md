@@ -48,8 +48,6 @@ db.save("output.html")
 ├── dashboard.py        # Core library — ChartBuilder, StatsHelper, DashboardBuilder
 ├── template.html       # HTML template rendered by DashboardBuilder
 ├── requirements.txt    # Python dependencies
-└── Example/
-    └── demo_dashboard.py   # Generates a sample dashboard from synthetic data
 ```
 
 ## Dependencies
