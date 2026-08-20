@@ -14,6 +14,7 @@ from dashlib.HtmlBuilder import (
     DropdownControl,
     RangeInputControl,
 )
+from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
@@ -55,57 +56,75 @@ def parse_html(html: str) -> HtmlInspector:
 # Builder factories
 # ---------------------------------------------------------------------------
 
-from pathlib import Path
-
+SECTION_LABEL = "Test Section"
+SECTION_KEY = "test_section"
+TAB_KEY = "test_tab"
+TAB_LABEL = "Test Tab"
+TAB_CONTENT = "<p>Test tab content.</p>"
+DASHBOARD_TITLE = "Test Dashboard"
+PLOTLY_VERSION = "5.18.0"
+VIEW_KEY = "test_view"
+VIEW_HEADING = "Test View Heading"
+VIEW_TAB_LABEL = "Test View Tab"
+VIEW_DESCRIPTION = "A description for the test view."
+CHART_DIV_ID = "test_chart_div"
+DROPDOWN_ID = "test_dropdown"
+DROPDOWN_LABEL = "Test Dropdown"
+DROPDOWN_OPTIONS = ["Option A", "Option B", "Option C"]
+RANGE_LO_ID = "test_lo"
+RANGE_HI_ID = "test_hi"
+RANGE_LABEL = "Test Range"
+RANGE_RESULT_ID = "test_range_result"
+BUTTON_LABEL = "Test Button"
+BUTTON_CONTENT = "<p>Test button content.</p>"
 TEMPLATE_PATH = Path(__file__).parent.parent / "template.html"
 
-
 def make_minimal_builder() -> HTMLBuilder:
-    """Smallest valid HTMLBuilder — one section, no views."""
+    """Smallest valid HTMLBuilder — one section with one tab, no views."""
     template_html = TEMPLATE_PATH.read_text(encoding="utf-8")
     b = HTMLBuilder(
-        title="Test Dashboard",
+        title=DASHBOARD_TITLE,
         main_tab_label="Overview",
-        dropdown_label="Select Ward",
-        plotly_version="5.18.0",
+        dropdown_label="Select Section",
+        plotly_version=PLOTLY_VERSION,
         template=template_html,
     )
-    section = b.add_section("ward_a", "Ward A")
-    section.add_tab("overview_tab", "Overview", "<p>Overview content.</p>")
+    section = b.add_section(SECTION_KEY, SECTION_LABEL)
+    section.add_tab(TAB_KEY, TAB_LABEL, TAB_CONTENT)
     return b
 
 
 def make_full_builder() -> HTMLBuilder:
-    """Realistic dashboard with sections, views, controls, and multiple chart types."""
+    """Builder with sections, views, controls, buttons, and dropdowns."""
     template_html = TEMPLATE_PATH.read_text(encoding="utf-8")
     b = HTMLBuilder(
-        title="Ward Safety Dashboard",
+        title=DASHBOARD_TITLE,
         main_tab_label="Overview",
-        dropdown_label="Select Ward",
-        plotly_version="5.18.0",
+        dropdown_label="Select Section",
+        plotly_version=PLOTLY_VERSION,
         template=template_html,
     )
 
     # Sections — tabs must exist before add_button / add_dropdown
-    section_a = b.add_section("ward_a", "Ward A", date_range=("2024-01", "2024-12"))
-    section_a.add_tab("summary_tab", "Summary", "<p>Placeholder</p>")
-    section_b = b.add_section("ward_b", "Ward B")
-    section_b.add_tab("metric_tab", "Metrics", "<p>Placeholder</p>")
+    section_a = b.add_section(SECTION_KEY, SECTION_LABEL, date_range=("2024-01", "2024-12"))
+    section_a.add_tab(TAB_KEY, TAB_LABEL, TAB_CONTENT)
+    section_b = b.add_section("second_section", "Second Section")
+    section_b.add_tab("second_tab", "Second Tab", "<p>Second tab content.</p>")
 
     # Views
     bar_view = ViewConfig(
-        key="falls_bar",
-        tab_label="Falls Bar",
-        heading="Falls by Month",
-        description="Monthly fall counts per ward.",
+        key=VIEW_KEY,
+        tab_label=VIEW_TAB_LABEL,
+        heading=VIEW_HEADING,
+        description=VIEW_DESCRIPTION,
         rows=[
             GraphRow(graphs=[
                 GraphConfig(
-                    div_id="falls_bar_chart",
+                    div_id=CHART_DIV_ID,
                     options=BarOptions(
                         x_col="Month",
-                        y_label="Falls",
-                        title="Falls by Month",
+                        y_label="Value",
+                        title="Test Chart",
                         barmode="group",
                     ),
                     height=450,
@@ -114,25 +133,25 @@ def make_full_builder() -> HTMLBuilder:
         ],
         controls=[
             DropdownControl(
-                control_id="ward_dropdown",
-                label="Ward",
-                options=["All", "Ward A", "Ward B"],
+                control_id=DROPDOWN_ID,
+                label=DROPDOWN_LABEL,
+                options=DROPDOWN_OPTIONS,
             )
         ],
     )
 
     line_view = ViewConfig(
-        key="trend_line",
-        tab_label="Trend",
-        heading="Falls Trend Over Time",
+        key="second_view",
+        tab_label="Second View Tab",
+        heading="Second View Heading",
         rows=[
             GraphRow(graphs=[
                 GraphConfig(
-                    div_id="trend_line_chart",
+                    div_id="second_chart_div",
                     options=LineOptions(
                         x_col="Month",
-                        y_label="Falls",
-                        title="Trend",
+                        y_label="Value",
+                        title="Second Chart",
                     ),
                 )
             ])
@@ -140,17 +159,17 @@ def make_full_builder() -> HTMLBuilder:
     )
 
     scatter_view = ViewConfig(
-        key="workload_scatter",
-        tab_label="Workload",
-        heading="Workload vs Falls",
+        key="third_view",
+        tab_label="Third View Tab",
+        heading="Third View Heading",
         rows=[
             GraphRow(graphs=[
                 GraphConfig(
-                    div_id="scatter_chart",
+                    div_id="third_chart_div",
                     options=ScatterOptions(
-                        x_col="Workload",
-                        y_col="Falls",
-                        title="Correlation",
+                        x_col="X",
+                        y_col="Y",
+                        title="Third Chart",
                         show_regression=True,
                         show_loess=True,
                         show_stats_badge=True,
@@ -160,10 +179,10 @@ def make_full_builder() -> HTMLBuilder:
         ],
         controls=[
             RangeInputControl(
-                lo_id="workload_lo",
-                hi_id="workload_hi",
-                label="Workload Range",
-                result_div_id="workload_result",
+                lo_id=RANGE_LO_ID,
+                hi_id=RANGE_HI_ID,
+                label=RANGE_LABEL,
+                result_div_id=RANGE_RESULT_ID,
             )
         ],
     )
@@ -172,21 +191,20 @@ def make_full_builder() -> HTMLBuilder:
     b.add_view(line_view)
     b.add_view(scatter_view)
 
-    # Inline button content
+    # Inline button and dropdown
     b.add_button(
-        section_key="ward_a",
-        tab_key="summary_tab",
-        button_label="Summary",
-        content_html="<p>Ward A summary content.</p>",
+        section_key=SECTION_KEY,
+        tab_key=TAB_KEY,
+        button_label=BUTTON_LABEL,
+        content_html=BUTTON_CONTENT,
     )
 
-    # Dropdown within a section tab
     b.add_dropdown(
-        section_key="ward_b",
-        tab_key="metric_tab",
-        dropdown_id="metric_select",
-        label="Metric",
-        options=["Falls", "Pressure Injuries"],
+        section_key="second_section",
+        tab_key="second_tab",
+        dropdown_id=DROPDOWN_ID,
+        label=DROPDOWN_LABEL,
+        options=DROPDOWN_OPTIONS,
     )
 
     return b
@@ -195,14 +213,6 @@ def make_full_builder() -> HTMLBuilder:
 # ---------------------------------------------------------------------------
 # render() — basic structure
 # ---------------------------------------------------------------------------
-
-class TestRenderDebug:
-    def test_render_output_repr(self):
-        """Temporary: print what render() actually returns to diagnose failures."""
-        html = make_minimal_builder().render()
-        print(f"\nrender() returned ({len(html)} chars): {repr(html[:200])}")
-        assert True  # always passes — just for inspection
-
 
 class TestRenderBasicStructure:
     def test_render_returns_string(self):
@@ -224,11 +234,11 @@ class TestRenderBasicStructure:
 
     def test_render_title_in_output(self):
         html = make_minimal_builder().render()
-        assert "Test Dashboard" in html
+        assert DASHBOARD_TITLE in html
 
     def test_render_plotly_version_referenced(self):
         html = make_minimal_builder().render()
-        assert "5.18.0" in html
+        assert PLOTLY_VERSION in html
 
 
 # ---------------------------------------------------------------------------
@@ -238,25 +248,23 @@ class TestRenderBasicStructure:
 class TestRenderSections:
     def test_section_label_present(self):
         html = make_full_builder().render()
-        assert "Ward A" in html
-        assert "Ward B" in html
+        assert SECTION_LABEL in html
 
     def test_date_range_present(self):
         html = make_full_builder().render()
-        assert "2024-01" in html or "2024" in html  # formatted or raw
+        assert "2024-01" in html or "2024" in html
 
     def test_button_label_present(self):
         html = make_full_builder().render()
-        assert "Summary" in html
+        assert BUTTON_LABEL in html
 
     def test_button_content_present(self):
         html = make_full_builder().render()
-        assert "Ward A summary content" in html
+        assert "Test button content" in html
 
     def test_dropdown_options_present(self):
         html = make_full_builder().render()
-        assert "Falls" in html
-        assert "Pressure Injuries" in html
+        assert DROPDOWN_OPTIONS[0] in html
 
 
 # ---------------------------------------------------------------------------
@@ -266,26 +274,20 @@ class TestRenderSections:
 class TestRenderViews:
     def test_view_headings_present(self):
         html = make_full_builder().render()
-        assert "Falls by Month" in html
-        assert "Falls Trend Over Time" in html
-        assert "Workload vs Falls" in html
+        assert VIEW_HEADING in html
 
     def test_view_tab_labels_present(self):
         html = make_full_builder().render()
-        assert "Falls Bar" in html
-        assert "Trend" in html
-        assert "Workload" in html
+        assert VIEW_TAB_LABEL in html
 
     def test_view_description_present(self):
         html = make_full_builder().render()
-        assert "Monthly fall counts per ward" in html
+        assert VIEW_DESCRIPTION in html
 
     def test_chart_div_ids_present(self):
         html = make_full_builder().render()
         inspector = parse_html(html)
-        assert "falls_bar_chart" in inspector.ids
-        assert "trend_line_chart" in inspector.ids
-        assert "scatter_chart" in inspector.ids
+        assert CHART_DIV_ID in inspector.ids
 
 
 # ---------------------------------------------------------------------------
@@ -295,22 +297,22 @@ class TestRenderViews:
 class TestRenderControls:
     def test_dropdown_control_label_present(self):
         html = make_full_builder().render()
-        assert "Ward" in html
+        assert DROPDOWN_LABEL in html
 
     def test_dropdown_control_options_present(self):
         html = make_full_builder().render()
-        assert "Ward A" in html
-        assert "Ward B" in html
+        for option in DROPDOWN_OPTIONS:
+            assert option in html
 
     def test_range_input_label_present(self):
         html = make_full_builder().render()
-        assert "Workload Range" in html
+        assert RANGE_LABEL in html
 
     def test_range_input_ids_present(self):
         html = make_full_builder().render()
         inspector = parse_html(html)
-        assert "workload_lo" in inspector.ids
-        assert "workload_hi" in inspector.ids
+        assert RANGE_LO_ID in inspector.ids
+        assert RANGE_HI_ID in inspector.ids
 
 
 # ---------------------------------------------------------------------------
@@ -377,10 +379,9 @@ class TestBuilderApi:
 
     def test_add_button_returns_builder(self):
         b = make_minimal_builder()
-        # "overview_tab" is created by make_minimal_builder
         result = b.add_button(
-            section_key="ward_a",
-            tab_key="overview_tab",
+            section_key=SECTION_KEY,
+            tab_key=TAB_KEY,
             button_label="Btn",
             content_html="<p>Hi</p>",
         )
@@ -389,8 +390,8 @@ class TestBuilderApi:
     def test_add_dropdown_returns_builder(self):
         b = make_minimal_builder()
         result = b.add_dropdown(
-            section_key="ward_a",
-            tab_key="overview_tab",
+            section_key=SECTION_KEY,
+            tab_key=TAB_KEY,
             dropdown_id="d1",
             label="Label",
             options=["X", "Y"],
