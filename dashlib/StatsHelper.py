@@ -286,7 +286,6 @@ class StatsHelper:
     def build_correlation_data(
         df_primary: pd.DataFrame,
         df_secondary: pd.DataFrame,
-        # --- primary (x-axis / "workload") configuration ---
         primary_value_col: str,
         primary_entity_col: str,
         primary_date_col: str,

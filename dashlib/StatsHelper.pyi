@@ -99,7 +99,7 @@ class StatsHelper:
         df:
             Source DataFrame.
         group_cols:
-            Columns to group by (e.g. ``["Ward", "Month"]``).
+            Columns to group by (e.g. ``["Category", "Period"]``).
         value_col:
             The numeric column to aggregate.
         aggs:
@@ -134,7 +134,7 @@ class StatsHelper:
         Exactly **one** of *bucket_col* or *bucket_fn* must be supplied.
 
         When *filter_col* / *filter_values* are given, the top-level keys of
-        the returned dict are the individual filter values (e.g. shift hours).
+        the returned dict are the individual filter values (e.g. time periods).
         Otherwise the dict has a single key ``"all"``.
 
         Parameters
@@ -142,9 +142,9 @@ class StatsHelper:
         df:
             Source DataFrame.
         group_col:
-            Column that identifies each group (e.g. ward name).
+            Column that identifies each group (e.g. segment name).
         value_col:
-            Numeric column to aggregate (e.g. fall count per shift).
+            Numeric column to aggregate (e.g. event count per interval).
         groups:
             Explicit ordered list of group values to include.
         bucket_col:
@@ -289,7 +289,7 @@ class StatsHelper:
         label_col:
             Column that receives *result_label* in the new row.
         result_label:
-            Text placed in *label_col* (e.g. ``"Δ Night–Day"``).
+            Text placed in *label_col* (e.g. ``"Δ Group A–Group B"``).
         numeric_cols:
             Columns to subtract.  Defaults to all numeric columns in *df*.
 
@@ -366,7 +366,7 @@ class StatsHelper:
         >>> df = StatsHelper.lambda_row(
         ...     df,
         ...     fn=lambda d: {"Average": d["Average"].mean()},
-        ...     label_col="Ward",
+        ...     label_col="Segment",
         ...     result_label="Global Mean",
         ... )
         """
@@ -443,63 +443,93 @@ class StatsHelper:
 
     @staticmethod
     def build_correlation_data(
-        df_workload: pd.DataFrame,
+        df_primary: pd.DataFrame,
         df_secondary: pd.DataFrame,
-        hour: int,
-        sec_col1: str,
-        sec_col2: str,
-        workload_date_col: str = ...,
-        workload_dept_col: str = ...,
-        workload_value_col: str = ...,
-        secondary_year_col: str = ...,
-        secondary_month_col: str = ...,
-        secondary_dept_col: str = ...,
+        primary_value_col: str,
+        primary_entity_col: str,
+        primary_date_col: str,
+        primary_agg_col: str = ...,
+        primary_filter_col: Optional[str] = ...,
+        primary_filter_value: Optional[Any] = ...,
+        secondary_y_cols: List[str] = ...,
+        secondary_entity_col: Optional[str] = ...,
+        secondary_date_col: Optional[str] = ...,
+        secondary_year_col: Optional[str] = ...,
+        secondary_month_col: Optional[str] = ...,
         named_groups: Optional[Dict[str, List[str]]] = ...,
         loess_frac: float = ...,
     ) -> Dict[str, Any]:
-        """Build scatter data (Pearson + OLS + LOESS) for the given *hour*,
-        keyed by department, named group, and an ``"Overall"`` aggregate.
+        """Build scatter data (Pearson + OLS + LOESS) keyed by entity,
+        named group, and an ``"Overall"`` aggregate.
+
+        The primary DataFrame is aggregated to one mean value per
+        (entity, period) pair, then joined to the secondary DataFrame on
+        the same keys before computing scatter statistics.
+
+        Exactly **one** of *secondary_date_col* or the pair
+        (*secondary_year_col*, *secondary_month_col*) must be supplied to
+        derive the shared period key.
 
         Parameters
         ----------
-        df_workload:
-            Workload DataFrame; must contain *workload_date_col*,
-            *workload_dept_col*, ``"Hour"``, and *workload_value_col*.
+        df_primary:
+            Primary DataFrame; must contain *primary_entity_col*,
+            *primary_date_col*, and *primary_value_col*.
         df_secondary:
-            Secondary-metric DataFrame; must contain *secondary_year_col*,
-            *secondary_month_col*, *secondary_dept_col*, *sec_col1*, and
-            *sec_col2*.
-        hour:
-            Shift hour to filter on (e.g. ``10``).
-        sec_col1:
-            First secondary-metric column (e.g. ``"FALLS"``).
-        sec_col2:
-            Second secondary-metric column (e.g. ``"PRESSURE"``).
-        workload_date_col:
-            Date column in *df_workload* (default ``"Date"``).
-        workload_dept_col:
-            Department column in *df_workload* (default ``"Department_Name"``).
-        workload_value_col:
-            Numeric workload column in *df_workload*
-            (default ``"Value_Per_Employee"``).
+            Secondary DataFrame; must contain the entity column and a
+            date column (or year/month columns), plus all
+            *secondary_y_cols*.
+        primary_value_col:
+            Numeric column in *df_primary* to aggregate as the x-axis
+            predictor.
+        primary_entity_col:
+            Column in *df_primary* that identifies each entity.
+        primary_date_col:
+            Date column in *df_primary* used to derive the YYYY-MM period
+            key.
+        primary_agg_col:
+            Name given to the aggregated primary column after grouping
+            (default ``"Primary_Avg"``).
+        primary_filter_col:
+            Optional column in *df_primary* to filter on before
+            aggregating (e.g. a time-of-day column).
+        primary_filter_value:
+            Value to match in *primary_filter_col*.
+        secondary_y_cols:
+            One or more columns in *df_secondary* used as y-axis outcomes.
+            At least one must be supplied.
+        secondary_entity_col:
+            Entity column in *df_secondary*.  Defaults to
+            *primary_entity_col* when omitted.
+        secondary_date_col:
+            Single datetime column in *df_secondary* from which the
+            YYYY-MM period key is derived.  Supply this **or** the
+            year/month pair below, not both.
         secondary_year_col:
-            Year column in *df_secondary* (default ``"Year"``).
+            Integer year column in *df_secondary* (used together with
+            *secondary_month_col*).
         secondary_month_col:
-            Month column in *df_secondary* (default ``"Month"``).
-        secondary_dept_col:
-            Department column in *df_secondary* (default ``"Department_Name"``).
+            Integer month column in *df_secondary* (used together with
+            *secondary_year_col*).
         named_groups:
-            Optional ``{group_label: [dept, ...]}`` mapping.  When supplied,
-            a pooled scatter entry is built for each group and the group
-            labels are recorded under ``"__department_groups__"``.
+            Optional ``{group_label: [entity, ...]}`` mapping.  When
+            supplied, a pooled scatter entry is built for each group and
+            the labels are recorded under ``"__entity_groups__"``.
         loess_frac:
             LOESS smoothing bandwidth (default ``0.6``).
 
         Returns
         -------
         Dict[str, Any]
-            Keys: ``__scatter__``, ``__departments__``,
-            ``__department_groups__``, ``__col1__``, ``__col2__``.
+            Keys: ``__scatter__``, ``__entities__``,
+            ``__entity_groups__``, ``__y_cols__``,
+            ``__primary_agg_col__``.
             Pass directly to :meth:`HTMLBuilder.set_correlation`.
+
+        Raises
+        ------
+        ValueError
+            If *secondary_y_cols* is empty, or if no secondary date
+            column(s) are provided.
         """
         ...
