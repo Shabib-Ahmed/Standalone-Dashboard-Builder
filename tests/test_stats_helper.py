@@ -12,25 +12,25 @@ from dashlib.StatsHelper import StatsHelper
 
 class TestGroupedAgg:
     def test_returns_dataframe(self, ward_df):
-        result = StatsHelper.grouped_agg(ward_df, group_cols=["Ward"], value_col="Value")
+        result = StatsHelper.grouped_agg(ward_df, group_cols=["Group"], value_col="Metric")
         assert isinstance(result, pd.DataFrame)
 
     def test_group_columns_present(self, ward_df):
-        result = StatsHelper.grouped_agg(ward_df, group_cols=["Ward"], value_col="Value")
-        assert "Ward" in result.columns
+        result = StatsHelper.grouped_agg(ward_df, group_cols=["Group"], value_col="Metric")
+        assert "Group" in result.columns
 
     def test_standard_agg_columns_present(self, ward_df):
-        result = StatsHelper.grouped_agg(ward_df, group_cols=["Ward"], value_col="Value")
+        result = StatsHelper.grouped_agg(ward_df, group_cols=["Group"], value_col="Metric")
         for col in ("Average", "StdDev", "Median", "Q1", "Q3", "P90", "Max", "Min", "Range", "IQR"):
             assert col in result.columns, f"Missing column: {col}"
 
     def test_average_correct(self, ward_df):
-        result = StatsHelper.grouped_agg(ward_df, group_cols=["Ward"], value_col="Value")
-        ward_a_avg = result.loc[result["Ward"] == "A", "Average"].iloc[0]
-        assert ward_a_avg == pytest.approx(20.0, abs=0.01)
+        result = StatsHelper.grouped_agg(ward_df, group_cols=["Group"], value_col="Metric")
+        group_x_avg = result.loc[result["Group"] == "X", "Average"].iloc[0]
+        assert group_x_avg == pytest.approx(20.0, abs=0.01)
 
     def test_rounding_applied(self, ward_df):
-        result = StatsHelper.grouped_agg(ward_df, group_cols=["Ward"], value_col="Value", decimals=1)
+        result = StatsHelper.grouped_agg(ward_df, group_cols=["Group"], value_col="Metric", decimals=1)
         numeric_cols = result.select_dtypes(include="number").columns
         for col in numeric_cols:
             for val in result[col]:
@@ -40,24 +40,24 @@ class TestGroupedAgg:
 
     def test_multi_group_cols(self, ward_df):
         result = StatsHelper.grouped_agg(
-            ward_df, group_cols=["Ward", "Month"], value_col="Value"
+            ward_df, group_cols=["Group", "Bucket"], value_col="Metric"
         )
-        assert "Ward" in result.columns
-        assert "Month" in result.columns
+        assert "Group" in result.columns
+        assert "Bucket" in result.columns
 
     def test_custom_agg(self, ward_df):
         result = StatsHelper.grouped_agg(
             ward_df,
-            group_cols=["Ward"],
-            value_col="Value",
+            group_cols=["Group"],
+            value_col="Metric",
             aggs={"MyMean": "mean", "MyMax": "max"},
         )
         assert "MyMean" in result.columns
         assert "MyMax" in result.columns
 
     def test_one_row_per_group(self, ward_df):
-        result = StatsHelper.grouped_agg(ward_df, group_cols=["Ward"], value_col="Value")
-        assert len(result) == ward_df["Ward"].nunique()
+        result = StatsHelper.grouped_agg(ward_df, group_cols=["Group"], value_col="Metric")
+        assert len(result) == ward_df["Group"].nunique()
 
 
 # ---------------------------------------------------------------------------
@@ -69,42 +69,42 @@ class TestComparisonData:
         with pytest.raises(ValueError):
             StatsHelper.comparison_data(
                 two_group_df,
-                group_col="Ward",
-                value_col="Value",
-                groups=["A", "B"],
+                group_col="Group",
+                value_col="Metric",
+                groups=["X", "Y"],
                 # neither bucket_col nor bucket_fn supplied
             )
 
     def test_bucket_col_returns_all_key(self, two_group_df):
         result = StatsHelper.comparison_data(
             two_group_df,
-            group_col="Ward",
-            value_col="Value",
-            groups=["A", "B"],
-            bucket_col="Shift",
+            group_col="Group",
+            value_col="Metric",
+            groups=["X", "Y"],
+            bucket_col="Category",
         )
         assert "all" in result
 
     def test_filter_col_creates_per_value_keys(self, two_group_df):
         result = StatsHelper.comparison_data(
             two_group_df,
-            group_col="Ward",
-            value_col="Value",
-            groups=["A", "B"],
-            bucket_col="Shift",
-            filter_col="Shift",
-            filter_values=["Day", "Night"],
+            group_col="Group",
+            value_col="Metric",
+            groups=["X", "Y"],
+            bucket_col="Category",
+            filter_col="Category",
+            filter_values=["Alpha", "Beta"],
         )
-        assert "Day" in result
-        assert "Night" in result
+        assert "Alpha" in result
+        assert "Beta" in result
 
     def test_records_have_required_keys(self, two_group_df):
         result = StatsHelper.comparison_data(
             two_group_df,
-            group_col="Ward",
-            value_col="Value",
-            groups=["A", "B"],
-            bucket_col="Shift",
+            group_col="Group",
+            value_col="Metric",
+            groups=["X", "Y"],
+            bucket_col="Category",
         )
         for group_dict in result.values():
             for records in group_dict.values():
@@ -115,27 +115,27 @@ class TestComparisonData:
     def test_bucket_fn_accepted(self, two_group_df):
         result = StatsHelper.comparison_data(
             two_group_df,
-            group_col="Ward",
-            value_col="Value",
-            groups=["A", "B"],
-            bucket_fn=lambda df: df["Shift"],
+            group_col="Group",
+            value_col="Metric",
+            groups=["X", "Y"],
+            bucket_fn=lambda df: df["Category"],
         )
         assert result  # non-empty
 
     def test_ci_zero_when_n_less_than_2(self):
         df = pd.DataFrame({
-            "Ward":  ["A"],
-            "Shift": ["Day"],
-            "Value": [5.0],
+            "Group":  ["X"],
+            "Category": ["Alpha"],
+            "Metric": [5.0],
         })
         result = StatsHelper.comparison_data(
             df,
-            group_col="Ward",
-            value_col="Value",
-            groups=["A"],
-            bucket_col="Shift",
+            group_col="Group",
+            value_col="Metric",
+            groups=["X"],
+            bucket_col="Category",
         )
-        records = result["all"]["A"]
+        records = result["all"]["X"]
         assert all(rec["ci"] == 0.0 for rec in records if rec["n"] < 2)
 
 
@@ -187,12 +187,12 @@ class TestAddCi:
 
     def test_ci_zero_when_n_is_1(self, summary_df):
         result = StatsHelper.add_ci(summary_df, mean_col="Average", std_col="StdDev", n_col="n")
-        ci_for_c = result.loc[result["Ward"] == "C", "CI_95"].iloc[0]
+        ci_for_c = result.loc[result["Group"] == "Z", "CI_95"].iloc[0]
         assert ci_for_c == 0.0
 
     def test_ci_positive_when_n_gte_2(self, summary_df):
         result = StatsHelper.add_ci(summary_df, mean_col="Average", std_col="StdDev", n_col="n")
-        ci_for_a = result.loc[result["Ward"] == "A", "CI_95"].iloc[0]
+        ci_for_a = result.loc[result["Group"] == "X", "CI_95"].iloc[0]
         assert ci_for_a > 0.0
 
 
@@ -206,10 +206,10 @@ class TestAddCustomGroup:
         # values via the mask — so the summary_df must contain value_col too.
         # Use a summary that already has the aggregated "Average" column as
         # the value_col, and a mask into that same frame.
-        mask = summary_df["Ward"].isin(["A", "B"])
+        mask = summary_df["Group"].isin(["X", "Y"])
         result = StatsHelper.add_custom_group(
             summary_df,
-            group_col="Ward",
+            group_col="Group",
             group_label="A+B",
             mask=mask,
             value_col="Average",
@@ -217,15 +217,15 @@ class TestAddCustomGroup:
         assert len(result) == len(summary_df) + 1
 
     def test_new_row_has_correct_label(self, summary_df):
-        mask = summary_df["Ward"] == "A"
+        mask = summary_df["Group"] == "X"
         result = StatsHelper.add_custom_group(
             summary_df,
-            group_col="Ward",
+            group_col="Group",
             group_label="CustomA",
             mask=mask,
             value_col="Average",
         )
-        assert "CustomA" in result["Ward"].values
+        assert "CustomA" in result["Group"].values
 
 
 # ---------------------------------------------------------------------------
@@ -234,64 +234,64 @@ class TestAddCustomGroup:
 
 class TestRowMutators:
     def test_subtraction_row_appended(self, summary_df):
-        mask_a = summary_df["Ward"] == "A"
-        mask_b = summary_df["Ward"] == "B"
+        mask_a = summary_df["Group"] == "X"
+        mask_b = summary_df["Group"] == "Y"
         result = StatsHelper.subtraction_row(
             summary_df,
             row_a_mask=mask_a,
             row_b_mask=mask_b,
-            label_col="Ward",
+            label_col="Group",
             result_label="Δ A-B",
         )
         assert len(result) == len(summary_df) + 1
-        assert "Δ A-B" in result["Ward"].values
+        assert "Δ A-B" in result["Group"].values
 
     def test_subtraction_values_correct(self, summary_df):
-        mask_a = summary_df["Ward"] == "A"
-        mask_b = summary_df["Ward"] == "B"
+        mask_a = summary_df["Group"] == "X"
+        mask_b = summary_df["Group"] == "Y"
         result = StatsHelper.subtraction_row(
             summary_df,
             row_a_mask=mask_a,
             row_b_mask=mask_b,
-            label_col="Ward",
+            label_col="Group",
             result_label="Δ A-B",
             numeric_cols=["Average"],
         )
-        diff_row = result.loc[result["Ward"] == "Δ A-B", "Average"].iloc[0]
+        diff_row = result.loc[result["Group"] == "Δ A-B", "Average"].iloc[0]
         assert diff_row == pytest.approx(20.0 - 45.0, abs=0.01)
 
     def test_addition_row_appended(self, summary_df):
-        masks = [summary_df["Ward"] == "A", summary_df["Ward"] == "B"]
+        masks = [summary_df["Group"] == "X", summary_df["Group"] == "Y"]
         result = StatsHelper.addition_row(
             summary_df,
             row_masks=masks,
-            label_col="Ward",
+            label_col="Group",
             result_label="A+B",
         )
         assert len(result) == len(summary_df) + 1
-        assert "A+B" in result["Ward"].values
+        assert "A+B" in result["Group"].values
 
     def test_addition_values_correct(self, summary_df):
-        masks = [summary_df["Ward"] == "A", summary_df["Ward"] == "B"]
+        masks = [summary_df["Group"] == "X", summary_df["Group"] == "Y"]
         result = StatsHelper.addition_row(
             summary_df,
             row_masks=masks,
-            label_col="Ward",
+            label_col="Group",
             result_label="A+B",
             numeric_cols=["Average"],
         )
-        sum_row = result.loc[result["Ward"] == "A+B", "Average"].iloc[0]
+        sum_row = result.loc[result["Group"] == "A+B", "Average"].iloc[0]
         assert sum_row == pytest.approx(20.0 + 45.0, abs=0.01)
 
     def test_lambda_row_appended(self, summary_df):
         result = StatsHelper.lambda_row(
             summary_df,
             fn=lambda d: {"Average": d["Average"].mean()},
-            label_col="Ward",
+            label_col="Group",
             result_label="Global Mean",
         )
         assert len(result) == len(summary_df) + 1
-        assert "Global Mean" in result["Ward"].values
+        assert "Global Mean" in result["Group"].values
 
 
 # ---------------------------------------------------------------------------
@@ -340,26 +340,26 @@ class TestPearsonR:
 class TestScatterStats:
     def test_returns_dict_with_label(self, ward_df):
         result = StatsHelper.scatter_stats(
-            ward_df, x_col="Value", y_cols=["CI"], label="Ward A"
+            ward_df, x_col="Metric", y_cols=["Error"], label="Group X"
         )
-        assert result["label"] == "Ward A"
+        assert result["label"] == "Group X"
 
     def test_contains_y_col_key(self, ward_df):
         result = StatsHelper.scatter_stats(
-            ward_df, x_col="Value", y_cols=["CI"], label="Test"
+            ward_df, x_col="Metric", y_cols=["Error"], label="Test"
         )
-        assert "CI" in result
+        assert "Error" in result
 
     def test_scatter_info_fields(self, ward_df):
         result = StatsHelper.scatter_stats(
-            ward_df, x_col="Value", y_cols=["CI"], label="Test"
+            ward_df, x_col="Metric", y_cols=["Error"], label="Test"
         )
-        info = result["CI"]
+        info = result["Error"]
         for key in ("x", "y", "r", "p", "slope", "intercept", "loess_x", "loess_y", "n", "ids", "timepoints"):
             assert key in info, f"Missing key '{key}' in ScatterInfo"
 
     def test_n_matches_dataframe_length(self, ward_df):
         result = StatsHelper.scatter_stats(
-            ward_df, x_col="Value", y_cols=["CI"], label="Test"
+            ward_df, x_col="Metric", y_cols=["Error"], label="Test"
         )
-        assert result["CI"]["n"] == len(ward_df)
+        assert result["Error"]["n"] == len(ward_df)

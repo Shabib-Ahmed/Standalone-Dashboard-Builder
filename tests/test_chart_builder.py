@@ -21,13 +21,13 @@ def assert_valid_html_fragment(html: str, title: str = "") -> None:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("method,extra_kwargs", [
-    ("bar",         {"x": "Month", "y": "Value", "color": "Ward"}),
-    ("grouped_bar", {"x": "Month", "y": "Value", "color": "Ward"}),
-    ("single_line", {"x": "Month", "y_default": "Value", "color_col": "Ward"}),
-    ("multi_line",  {"x": "Month", "y_default": "Value", "color_col": "Ward"}),
-    ("scatter",     {"x": "Value", "y": "CI",    "color": "Ward"}),
-    ("box",         {"x": "Ward",  "y": "Value"}),
-    ("dual_axis_line", {"x": "Month", "y1": "Value", "y2": "CI"}),
+    ("bar",         {"x": "Bucket", "y": "Metric", "color": "Group"}),
+    ("grouped_bar", {"x": "Bucket", "y": "Metric", "color": "Group"}),
+    ("single_line", {"x": "Bucket", "y_default": "Metric", "color_col": "Group"}),
+    ("multi_line",  {"x": "Bucket", "y_default": "Metric", "color_col": "Group"}),
+    ("scatter",     {"x": "Metric", "y": "Error",    "color": "Group"}),
+    ("box",         {"x": "Group",  "y": "Metric"}),
+    ("dual_axis_line", {"x": "Bucket", "y1": "Metric", "y2": "Error"}),
 ])
 def test_chart_returns_valid_html(chart_df, method, extra_kwargs):
     fn = getattr(ChartBuilder, method)
@@ -40,18 +40,18 @@ def test_chart_returns_valid_html(chart_df, method, extra_kwargs):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("method,extra_kwargs", [
-    ("bar",            {"x": "Month", "y": "Value", "color": "Ward"}),
-    ("grouped_bar",    {"x": "Month", "y": "Value", "color": "Ward"}),
-    ("single_line",    {"x": "Month", "y_default": "Value", "color_col": "Ward"}),
-    ("multi_line",     {"x": "Month", "y_default": "Value", "color_col": "Ward"}),
-    ("scatter",        {"x": "Value", "y": "CI"}),
-    ("box",            {"x": "Ward",  "y": "Value"}),
-    ("dual_axis_line", {"x": "Month", "y1": "Value", "y2": "CI"}),
+    ("bar",            {"x": "Bucket", "y": "Metric", "color": "Group"}),
+    ("grouped_bar",    {"x": "Bucket", "y": "Metric", "color": "Group"}),
+    ("single_line",    {"x": "Bucket", "y_default": "Metric", "color_col": "Group"}),
+    ("multi_line",     {"x": "Bucket", "y_default": "Metric", "color_col": "Group"}),
+    ("scatter",        {"x": "Metric", "y": "Error"}),
+    ("box",            {"x": "Group",  "y": "Metric"}),
+    ("dual_axis_line", {"x": "Bucket", "y1": "Metric", "y2": "Error"}),
 ])
 def test_title_appears_in_output(chart_df, method, extra_kwargs):
     fn = getattr(ChartBuilder, method)
-    html = fn(chart_df, title="WardMetric", **extra_kwargs)
-    assert "WardMetric" in html
+    html = fn(chart_df, title="TestTitle", **extra_kwargs)
+    assert "TestTitle" in html
 
 
 # ---------------------------------------------------------------------------
@@ -61,19 +61,19 @@ def test_title_appears_in_output(chart_df, method, extra_kwargs):
 class TestBar:
     def test_error_y_accepted(self, chart_df):
         html = ChartBuilder.bar(
-            chart_df, x="Month", y="Value", color="Ward", error_y="CI"
+            chart_df, x="Bucket", y="Metric", color="Group", error_y="Error"
         )
         assert_valid_html_fragment(html)
 
     def test_text_col_accepted(self, chart_df):
         html = ChartBuilder.bar(
-            chart_df, x="Month", y="Value", color="Ward", text="Value"
+            chart_df, x="Bucket", y="Metric", color="Group", text="Metric"
         )
         assert_valid_html_fragment(html)
 
     def test_axis_labels_appear(self, chart_df):
         html = ChartBuilder.bar(
-            chart_df, x="Month", y="Value", color="Ward",
+            chart_df, x="Bucket", y="Metric", color="Group",
             x_label="X-Axis", y_label="Y-Axis"
         )
         assert "X-Axis" in html
@@ -87,15 +87,15 @@ class TestBar:
 class TestGroupedBar:
     def test_error_y_accepted(self, chart_df):
         html = ChartBuilder.grouped_bar(
-            chart_df, x="Month", y="Value", color="Ward", error_y="CI"
+            chart_df, x="Bucket", y="Metric", color="Group", error_y="Error"
         )
         assert_valid_html_fragment(html)
 
     def test_legend_title_appears(self, chart_df):
         html = ChartBuilder.grouped_bar(
-            chart_df, x="Month", y="Value", color="Ward", legend_title="Department"
+            chart_df, x="Bucket", y="Metric", color="Group", legend_title="Series"
         )
-        assert "Department" in html
+        assert "Series" in html
 
 
 # ---------------------------------------------------------------------------
@@ -104,9 +104,9 @@ class TestGroupedBar:
 
 class TestHistogram:
     def test_returns_valid_html(self):
-        s = pd.Series(["Ward A", "Ward A", "Ward B", "Ward C", "Ward B"])
-        html = ChartBuilder.histogram(s, title="Ward Distribution")
-        assert_valid_html_fragment(html, title="Ward Distribution")
+        s = pd.Series(["Group X", "Group X", "Group Y", "Group Z", "Group Y"])
+        html = ChartBuilder.histogram(s, title="Group Distribution")
+        assert_valid_html_fragment(html, title="Group Distribution")
 
     def test_empty_series_does_not_raise(self):
         s = pd.Series([], dtype=str)
@@ -114,9 +114,9 @@ class TestHistogram:
         assert isinstance(html, str)
 
     def test_x_label_appears(self):
-        s = pd.Series(["A", "B", "A"])
-        html = ChartBuilder.histogram(s, x_label="Category")
-        assert "Category" in html
+        s = pd.Series(["X", "Y", "A"])
+        html = ChartBuilder.histogram(s, x_label="Label")
+        assert "Label" in html
 
 
 # ---------------------------------------------------------------------------
@@ -129,9 +129,9 @@ class TestTable:
         assert_valid_html_fragment(html, title="Summary Table")
 
     def test_drop_cols_removes_column(self, chart_df):
-        html = ChartBuilder.table(chart_df, drop_cols=["CI"])
-        # The "CI" header should not appear in the rendered table
-        assert "CI" not in html
+        html = ChartBuilder.table(chart_df, drop_cols=["Error"])
+        # The "Error" header should not appear in the rendered table
+        assert "Error" not in html
 
     def test_all_column_names_present_by_default(self, chart_df):
         html = ChartBuilder.table(chart_df)
@@ -147,20 +147,20 @@ class TestLineCharts:
     def test_single_line_y_options_accepted(self, chart_df):
         html = ChartBuilder.single_line(
             chart_df,
-            x="Month",
-            y_default="Value",
-            color_col="Ward",
-            y_options=["Value", "CI"],
+            x="Bucket",
+            y_default="Metric",
+            color_col="Group",
+            y_options=["Metric", "Error"],
         )
         assert_valid_html_fragment(html)
 
     def test_multi_line_y_options_accepted(self, chart_df):
         html = ChartBuilder.multi_line(
             chart_df,
-            x="Month",
-            y_default="Value",
-            color_col="Ward",
-            y_options=["Value", "CI"],
+            x="Bucket",
+            y_default="Metric",
+            color_col="Group",
+            y_options=["Metric", "Error"],
         )
         assert_valid_html_fragment(html)
 
@@ -172,12 +172,12 @@ class TestLineCharts:
 class TestScatter:
     def test_size_col_accepted(self, chart_df):
         html = ChartBuilder.scatter(
-            chart_df, x="Value", y="CI", color="Ward", size="Size"
+            chart_df, x="Metric", y="Error", color="Group", size="Size"
         )
         assert_valid_html_fragment(html)
 
     def test_no_color_accepted(self, chart_df):
-        html = ChartBuilder.scatter(chart_df, x="Value", y="CI")
+        html = ChartBuilder.scatter(chart_df, x="Metric", y="Error")
         assert_valid_html_fragment(html)
 
 
@@ -189,11 +189,11 @@ class TestDualAxisLine:
     def test_both_axis_labels_appear(self, chart_df):
         html = ChartBuilder.dual_axis_line(
             chart_df,
-            x="Month", y1="Value", y2="CI",
-            y1_label="Falls", y2_label="Pressure",
+            x="Bucket", y1="Metric", y2="Error",
+            y1_label="yvalue1", y2_label="yvalue2",
         )
-        assert "Falls" in html
-        assert "Pressure" in html
+        assert "yvalue1" in html
+        assert "yvalue2" in html
 
 
 # ---------------------------------------------------------------------------
@@ -202,13 +202,13 @@ class TestDualAxisLine:
 
 class TestBox:
     def test_color_col_accepted(self, chart_df):
-        html = ChartBuilder.box(chart_df, x="Ward", y="Value", color="Ward")
+        html = ChartBuilder.box(chart_df, x="Group", y="Metric", color="Group")
         assert_valid_html_fragment(html)
 
     def test_axis_labels_appear(self, chart_df):
         html = ChartBuilder.box(
-            chart_df, x="Ward", y="Value",
-            x_label="Department", y_label="Incidents"
+            chart_df, x="Group", y="Metric",
+            x_label="Series", y_label="Count"
         )
-        assert "Department" in html
-        assert "Incidents" in html
+        assert "Series" in html
+        assert "Count" in html
